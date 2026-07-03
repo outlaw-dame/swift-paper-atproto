@@ -16,7 +16,7 @@ struct MainTabView: View {
             .tag(0)
             
             NavigationStack {
-                ExploreView()
+                DiscoveryView()
             }
             .tabItem {
                 Label("Explore", systemImage: "safari")
