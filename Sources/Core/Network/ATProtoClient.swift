@@ -24,6 +24,7 @@ public final class ATProtoClient: ObservableObject {
     private let activeHandleKey = "atproto_active_handle"
     
     private var isRefreshingSession = false
+    private var isFlushingOutbox = false
     
     public init() {
         restoreSessionFromKeychain()
@@ -64,7 +65,10 @@ public final class ATProtoClient: ObservableObject {
     private func restoreSessionFromKeychain() {
         // Load active accounts index
         if let indexString = KeychainHelper.get(key: accountsIndexKey) {
-            self.loggedInAccounts = indexString.components(separatedBy: ",").filter { !$0.isEmpty }
+            let accounts = indexString.components(separatedBy: ",").filter { !$0.isEmpty }
+            self.loggedInAccounts = accounts.filter { handle in
+                (validateHandle(handle) || handle.starts(with: "mock") || handle.contains(".mock")) && !handle.contains(",")
+            }
         }
         
         guard let activeHandle = KeychainHelper.get(key: activeHandleKey),
@@ -73,6 +77,9 @@ public final class ATProtoClient: ObservableObject {
               let did = KeychainHelper.get(key: "atproto_\(activeHandle)_did") else {
             return
         }
+        
+        // Active handle must be in the sanitized index
+        guard loggedInAccounts.contains(activeHandle) else { return }
         
         self.session = CreateSessionResponse(
             did: did,
@@ -86,7 +93,10 @@ public final class ATProtoClient: ObservableObject {
     }
     
     private func persistSessionToKeychain(_ session: CreateSessionResponse) {
-        let handle = session.handle
+        let handle = session.handle.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Sanitize check
+        guard (validateHandle(handle) || handle.starts(with: "mock") || handle.contains(".mock")) && !handle.contains(",") else { return }
         
         // Save account-specific credentials
         KeychainHelper.save(key: "atproto_\(handle)_access_jwt", value: session.accessJwt)
@@ -385,7 +395,7 @@ public final class ATProtoClient: ObservableObject {
     
     public func createPost(text: String, using store: LocalStore) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, trimmed.count <= 300 else { return }
         
         let payload: [String: String] = [
             "text": trimmed,
@@ -440,6 +450,9 @@ public final class ATProtoClient: ObservableObject {
     
     public func flushOutbox(using store: LocalStore) async {
         guard !useMockData, isAuthenticated else { return }
+        guard !isFlushingOutbox else { return }
+        isFlushingOutbox = true
+        defer { isFlushingOutbox = false }
         
         let pending = store.getAllPendingActions()
         guard !pending.isEmpty else { return }
