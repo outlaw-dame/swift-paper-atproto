@@ -1,6 +1,6 @@
 # Swift-Paper-ATProto
 
-A native Swift/SwiftUI multiplatform client (macOS/iOS) for the AT Protocol (Bluesky), inspired by Facebook Paper, Neeva Gist, and Apple HIG.
+A native Swift/SwiftUI multiplatform client (macOS/iOS) for the AT Protocol (Bluesky),
 
 This project is a Swift-based implementation mirroring the concepts of [Paper-ATProto](https://github.com/outlaw-dame/paper-atproto).
 
