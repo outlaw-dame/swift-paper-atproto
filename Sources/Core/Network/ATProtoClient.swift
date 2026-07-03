@@ -11,7 +11,15 @@ public final class ATProtoClient: ObservableObject {
     
     private let baseURL = URL(string: "https://bsky.social/xrpc")!
     
-    public init() {}
+    // Keychain keys
+    private let accessJwtKey = "atproto_access_jwt"
+    private let refreshJwtKey = "atproto_refresh_jwt"
+    private let handleKey = "atproto_user_handle"
+    private let didKey = "atproto_user_did"
+    
+    public init() {
+        restoreSessionFromKeychain()
+    }
     
     // MARK: - Input Validation & Sanitization (Adversarial Hardening)
     
@@ -36,7 +44,50 @@ public final class ATProtoClient: ObservableObject {
         return regex.firstMatch(in: uri, options: [], range: range) != nil
     }
     
-    // MARK: - Exponential Backoff Wrapper (Self-Healing Connection)
+    public func validateCursor(_ cursor: String) -> Bool {
+        // Alphanumeric, equals (base64 padding), slashes, dashes, colons, dots, percents (encoded)
+        let pattern = "^[a-zA-Z0-9+=/._%:-]+$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(location: 0, length: cursor.utf16.count)
+        return regex.firstMatch(in: cursor, options: [], range: range) != nil
+    }
+    
+    // MARK: - Keychain Session Storage
+    
+    private func restoreSessionFromKeychain() {
+        guard let access = KeychainHelper.get(key: accessJwtKey),
+              let refresh = KeychainHelper.get(key: refreshJwtKey),
+              let handle = KeychainHelper.get(key: handleKey),
+              let did = KeychainHelper.get(key: didKey) else {
+            return
+        }
+        
+        self.session = CreateSessionResponse(
+            did: did,
+            handle: handle,
+            email: nil,
+            accessJwt: access,
+            refreshJwt: refresh
+        )
+        self.isAuthenticated = true
+        self.useMockData = false // Session restored -> prioritize live API calls
+    }
+    
+    private func persistSessionToKeychain(_ session: CreateSessionResponse) {
+        KeychainHelper.save(key: accessJwtKey, value: session.accessJwt)
+        KeychainHelper.save(key: refreshJwtKey, value: session.refreshJwt)
+        KeychainHelper.save(key: handleKey, value: session.handle)
+        KeychainHelper.save(key: didKey, value: session.did)
+    }
+    
+    private func clearSessionFromKeychain() {
+        KeychainHelper.delete(key: accessJwtKey)
+        KeychainHelper.delete(key: refreshJwtKey)
+        KeychainHelper.delete(key: handleKey)
+        KeychainHelper.delete(key: didKey)
+    }
+    
+    // MARK: - Exponential Backoff Wrapper
     
     private func executeRequestWithBackoff<T: Decodable>(
         _ request: URLRequest,
@@ -59,7 +110,6 @@ public final class ATProtoClient: ObservableObject {
                     return try decoder.decode(T.self, from: data)
                 }
                 
-                // Inspect status code: retry on transient rate-limiting (429) or service outages (503/504)
                 let isTransientStatus = httpResponse.statusCode == 429 || httpResponse.statusCode == 503 || httpResponse.statusCode == 504
                 
                 if isTransientStatus && attempt < maxRetries {
@@ -68,16 +118,16 @@ public final class ATProtoClient: ObservableObject {
                     continue
                 }
                 
-                // Persistent client/auth errors (400, 401, 403, 404): Fail fast, do not retry
+                // Sanitize server errors to prevent stack trace leaks
                 if let errorJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let message = errorJSON["message"] as? String {
-                    throw NSError(domain: "ATProtoError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+                    let sanitizedMessage = message.components(separatedBy: "stack:").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Network request failed."
+                    throw NSError(domain: "ATProtoError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: sanitizedMessage])
                 } else {
-                    throw NSError(domain: "ATProtoError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server returned code \(httpResponse.statusCode)"])
+                    throw NSError(domain: "ATProtoError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Authentication server error (code \(httpResponse.statusCode))."])
                 }
                 
             } catch {
-                // If it's a transient networking error (timeouts, connection drops)
                 let nsError = error as NSError
                 let isTransientNetwork = nsError.domain == NSURLErrorDomain && 
                     (nsError.code == URLError.timedOut.rawValue ||
@@ -97,9 +147,7 @@ public final class ATProtoClient: ObservableObject {
     }
     
     private func calculateDelay(attempt: Int, initialDelay: TimeInterval) -> TimeInterval {
-        // Exponential backoff: initialDelay * 2^(attempt-1)
         let baseDelay = initialDelay * pow(2.0, Double(attempt - 1))
-        // Jitter: randomize within +/- 15% to prevent synchronized herd hammering
         let jitter = Double.random(in: -0.15...0.15) * baseDelay
         return baseDelay + jitter
     }
@@ -110,7 +158,6 @@ public final class ATProtoClient: ObservableObject {
         isLoading = true
         errorMessage = nil
         
-        // Input validation & sanitation to prevent SSRF/injection
         let sanitizedHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
         if !useMockData && !validateHandle(sanitizedHandle) {
             self.errorMessage = "Invalid handle format. Please use standard domain layout."
@@ -120,14 +167,16 @@ public final class ATProtoClient: ObservableObject {
         
         if useMockData || sanitizedHandle.lowercased() == "mock" {
             try? await Task.sleep(nanoseconds: 800_000_000)
-            self.session = CreateSessionResponse(
+            let mockSession = CreateSessionResponse(
                 did: "did:plc:mockuser12345",
                 handle: sanitizedHandle.isEmpty ? "mockuser.bsky.social" : sanitizedHandle,
                 email: "mock@example.com",
                 accessJwt: "mock_jwt_access_token",
                 refreshJwt: "mock_jwt_refresh_token"
             )
+            self.session = mockSession
             self.isAuthenticated = true
+            persistSessionToKeychain(mockSession)
             self.isLoading = false
             return
         }
@@ -144,10 +193,10 @@ public final class ATProtoClient: ObservableObject {
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             
-            // Execute login with backoff (e.g. if authentication endpoints are busy)
             let sessionResp: CreateSessionResponse = try await executeRequestWithBackoff(request)
             self.session = sessionResp
             self.isAuthenticated = true
+            persistSessionToKeychain(sessionResp)
         } catch {
             self.errorMessage = error.localizedDescription
         }
@@ -157,6 +206,7 @@ public final class ATProtoClient: ObservableObject {
     // MARK: - Actions: Logout
     
     public func logout() {
+        clearSessionFromKeychain()
         self.session = nil
         self.isAuthenticated = false
         self.errorMessage = nil
@@ -177,8 +227,10 @@ public final class ATProtoClient: ObservableObject {
         var urlComponents = URLComponents(url: baseURL.appendingPathComponent("app.bsky.feed.getTimeline"), resolvingAgainstBaseURL: true)!
         var queryItems = [URLQueryItem(name: "algorithm", value: "reverse-chronological")]
         if let cursor = cursor {
-            // Sanitize query parameter input to prevent parameter poisoning
             let sanitizedCursor = cursor.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard validateCursor(sanitizedCursor) else {
+                throw NSError(domain: "ATProtoError", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid page reference token format."])
+            }
             queryItems.append(URLQueryItem(name: "cursor", value: sanitizedCursor))
         }
         urlComponents.queryItems = queryItems
@@ -193,7 +245,6 @@ public final class ATProtoClient: ObservableObject {
     // MARK: - Actions: Fetch Thread
     
     public func fetchThread(postUri: String) async throws -> GetPostThreadResponse {
-        // Direct validation of ATProto URI before querying the network (Prevent Path Traversal/Injection)
         guard validatePostURI(postUri) || useMockData else {
             throw NSError(domain: "ATProtoError", code: 400, userInfo: [NSLocalizedDescriptionKey: "Malformed ATProtocol post URI reference."])
         }

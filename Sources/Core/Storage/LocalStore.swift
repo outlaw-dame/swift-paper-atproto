@@ -37,6 +37,9 @@ public final class LocalStore: ObservableObject {
             let directory = paths[0].appendingPathComponent("SwiftPaperATProto", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             
+            // Hardening: Restrict directory permissions to owner only (700) to block local processes access
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            
             self.store = try Store(directoryPath: directory.path)
             if let store = store {
                 self.postBox = store.box(for: CachedPostEntity.self)
