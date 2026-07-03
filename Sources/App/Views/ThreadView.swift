@@ -9,9 +9,13 @@ struct ThreadView: View {
     @State private var isLoading = false
     @State private var errorMsg: String? = nil
     
-    @State private var stanceCoverage: [String: Double] = ["Analytical": 0.45, "Supportive": 0.35, "Skeptical": 0.20]
-    @State private var centralEntities: [String] = ["Decentralization", "SwiftUI", "AT Protocol", "Local-First"]
-    @State private var integrityScore: Double = 0.94
+    // Dynamic Thread Insights parsed via ThreadAnalytics substrate
+    @State private var stanceCoverage: [String: Double] = [:]
+    @State private var centralEntities: [String] = []
+    @State private var integrityScore: Double = 1.0
+    
+    // Collapsible node states (Self-Healing / Navigational UI)
+    @State private var collapsedNodeUris: Set<String> = []
     
     var body: some View {
         ZStack {
@@ -41,6 +45,7 @@ struct ThreadView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
                             
+                            // Dynamic Analytics Dashboard
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
                                     Label("Thread Interpretation Layer", systemImage: "brain.head.profile.fill")
@@ -64,17 +69,33 @@ struct ThreadView: View {
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                                 
-                                HStack(spacing: 8) {
+                                // Dynamic Stance Progress Bars
+                                VStack(spacing: 6) {
                                     ForEach(stanceCoverage.sorted(by: { $0.value > $1.value }), id: \.key) { key, val in
-                                        Text("\(key) (\(Int(val * 100))%)")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.white.opacity(0.08))
-                                            .cornerRadius(8)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            HStack {
+                                                Text(key)
+                                                    .font(.system(size: 9, weight: .bold))
+                                                Spacer()
+                                                Text("\(Int(val * 100))%")
+                                                    .font(.system(size: 9, design: .monospaced))
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            GeometryReader { barGeo in
+                                                ZStack(alignment: .leading) {
+                                                    Capsule().fill(Color.white.opacity(0.06))
+                                                    Capsule()
+                                                        .fill(key == "Supportive" ? Color.green : (key == "Skeptical" ? Color.orange : Color.blue))
+                                                        .frame(width: barGeo.size.width * CGFloat(val))
+                                                }
+                                            }
+                                            .frame(height: 4)
+                                        }
                                     }
                                 }
+                                .padding(.vertical, 4)
                                 
+                                // Dynamic Entity chips
                                 FlowLayout(items: centralEntities) { entity in
                                     Text("#\(entity)")
                                         .font(.system(size: 10, design: .monospaced))
@@ -95,6 +116,7 @@ struct ThreadView: View {
                             .padding(.horizontal)
                             .padding(.top, 10)
                             
+                            // Root Post view
                             if let post = root.post {
                                 RootPostView(post: post)
                                     .padding(.horizontal)
@@ -104,6 +126,7 @@ struct ThreadView: View {
                                 .background(Color.white.opacity(0.1))
                                 .padding(.horizontal)
                             
+                            // Collapsible Comment Tree
                             VStack(alignment: .leading, spacing: 14) {
                                 Text("Resolved Comments")
                                     .font(.subheadline)
@@ -113,7 +136,11 @@ struct ThreadView: View {
                                 
                                 if let replies = root.replies, !replies.isEmpty {
                                     ForEach(replies, id: \.self) { node in
-                                        ReplyNodeView(node: node, depth: 0)
+                                        ReplyNodeView(
+                                            node: node,
+                                            depth: 0,
+                                            collapsedNodeUris: $collapsedNodeUris
+                                        )
                                     }
                                 } else {
                                     Text("No comments in this thread.")
@@ -143,6 +170,12 @@ struct ThreadView: View {
             do {
                 let response = try await client.fetchThread(postUri: postUri)
                 self.rootNode = response.thread
+                
+                // Parse metrics dynamically
+                let insights = ThreadAnalytics.analyzeThread(response.thread)
+                self.stanceCoverage = insights.stanceCoverage
+                self.centralEntities = insights.centralEntities
+                self.integrityScore = insights.integrityScore
             } catch {
                 self.errorMsg = error.localizedDescription
             }
@@ -206,16 +239,20 @@ struct RootPostView: View {
 struct ReplyNodeView: View {
     let node: ThreadNode
     let depth: Int
+    @Binding var collapsedNodeUris: Set<String>
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let post = node.post {
+                let isCollapsed = collapsedNodeUris.contains(post.uri)
+                
                 HStack(alignment: .top, spacing: 12) {
+                    // Indent Line markers
                     if depth > 0 {
                         Rectangle()
                             .fill(Color.white.opacity(0.15))
-                            .frame(width: 2)
-                            .padding(.leading, CGFloat(depth * 8))
+                            .frame(width: 1.5)
+                            .padding(.leading, CGFloat(depth * 10))
                     }
                     
                     VStack(alignment: .leading, spacing: 8) {
@@ -241,29 +278,67 @@ struct ReplyNodeView: View {
                             
                             Spacer()
                             
-                            Text(String(format: "Score: %.2f", Double(post.likeCount ?? 0) / 10.0))
-                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.secondary)
+                            // Collapsed/Collapsed badge indicator
+                            if isCollapsed {
+                                let totalRepliesCount = countAllReplies(node)
+                                Text("[+ \(totalRepliesCount) comments]")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.accentColor)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.12))
+                                    .cornerRadius(4)
+                            } else {
+                                Text(String(format: "Score: %.2f", Double(post.likeCount ?? 0) / 10.0))
+                                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         
-                        Text(post.record.text)
-                            .font(.caption)
-                            .lineSpacing(3)
+                        if !isCollapsed {
+                            Text(post.record.text)
+                                .font(.caption)
+                                .lineSpacing(3)
+                        }
                     }
                     .padding(10)
-                    .background(Color.white.opacity(0.04))
+                    .background(Color.white.opacity(isCollapsed ? 0.02 : 0.04))
                     .cornerRadius(12)
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.25)) {
+                            if isCollapsed {
+                                collapsedNodeUris.remove(post.uri)
+                            } else {
+                                collapsedNodeUris.insert(post.uri)
+                            }
+                        }
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 4)
-            }
-            
-            if let replies = node.replies, !replies.isEmpty {
-                ForEach(replies, id: \.self) { child in
-                    ReplyNodeView(node: child, depth: depth + 1)
+                
+                // Render children recursively (Only if NOT collapsed)
+                if !isCollapsed, let replies = node.replies, !replies.isEmpty {
+                    ForEach(replies, id: \.self) { child in
+                        ReplyNodeView(
+                            node: child,
+                            depth: depth + 1,
+                            collapsedNodeUris: $collapsedNodeUris
+                        )
+                    }
                 }
             }
         }
+    }
+    
+    // Count child replies recursive helper
+    private func countAllReplies(_ node: ThreadNode) -> Int {
+        guard let replies = node.replies else { return 0 }
+        var count = replies.count
+        for child in replies {
+            count += countAllReplies(child)
+        }
+        return count
     }
 }
 
