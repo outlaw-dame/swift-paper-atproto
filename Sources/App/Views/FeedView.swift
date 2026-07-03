@@ -9,13 +9,16 @@ struct FeedView: View {
     @State private var selectedPost: FeedViewPost? = nil
     @State private var isRefreshing = false
     @State private var loadingError: String? = nil
+    @State private var activeFeedUri: String? = nil
     
     // HIG Gesture States for Card Transitions
     @State private var isCardExpanded = false
     @State private var cardDragOffset: CGFloat = 0.0
     
     var body: some View {
-        ZStack {
+        var sorted = posts
+        
+        return ZStack {
             Color.black.ignoresSafeArea()
             
             VStack(spacing: 0) {
@@ -53,6 +56,47 @@ struct FeedView: View {
                     .padding(.horizontal)
                     .padding(.vertical, 10)
                     .transition(.move(edge: .top).combined(with: .opacity))
+                    
+                    // Horizontal Custom Feeds Selector Bar
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    activeFeedUri = nil
+                                    loadInitialTimeline()
+                                }
+                            } label: {
+                                Text("Primary Feed")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(activeFeedUri == nil ? Color(red: 0.1, green: 0.5, blue: 0.9) : Color.white.opacity(0.06))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(20)
+                            }
+                            
+                            ForEach(store.pinnedFeeds, id: \.uri) { feed in
+                                Button {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        activeFeedUri = feed.uri
+                                        refreshTimeline()
+                                    }
+                                } label: {
+                                    Text(feed.displayName)
+                                        .font(.caption)
+                                        .fontWeight(.bold)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(activeFeedUri == feed.uri ? Color(red: 0.1, green: 0.5, blue: 0.9) : Color.white.opacity(0.06))
+                                        .foregroundColor(.white)
+                                        .cornerRadius(20)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 10)
+                    }
                 }
                 
                 if isRefreshing && posts.isEmpty {
@@ -170,8 +214,9 @@ struct FeedView: View {
     }
     
     private func loadInitialTimeline() {
-        if !store.cachedFeed.isEmpty {
-            self.posts = store.cachedFeed
+        let sorted = store.getLocalSortedFeed(for: activeFeedUri)
+        if !sorted.isEmpty {
+            self.posts = sorted
             self.selectedPost = self.posts.first
         } else {
             refreshTimeline()
@@ -184,9 +229,14 @@ struct FeedView: View {
         
         Task {
             do {
-                let response = try await client.fetchTimeline()
+                let response: GetTimelineResponse
+                if let feedUri = activeFeedUri {
+                    response = try await client.fetchCustomTimeline(feedUri: feedUri)
+                } else {
+                    response = try await client.fetchTimeline()
+                }
                 store.cacheFeed(response.feed)
-                self.posts = response.feed
+                self.posts = store.getLocalSortedFeed(for: activeFeedUri)
                 if self.selectedPost == nil || !self.posts.contains(where: { $0.id == self.selectedPost?.id }) {
                     self.selectedPost = self.posts.first
                 }

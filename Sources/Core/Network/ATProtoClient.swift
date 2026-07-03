@@ -53,6 +53,13 @@ public final class ATProtoClient: ObservableObject {
         return regex.firstMatch(in: uri, options: [], range: range) != nil
     }
     
+    public func validateFeedGeneratorURI(_ uri: String) -> Bool {
+        let pattern = "^at://did:[a-z0-9]+:[a-zA-Z0-9._%:-]+/app\\.bsky\\.feed\\.generator/[a-zA-Z0-9_-]+$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(location: 0, length: uri.utf16.count)
+        return regex.firstMatch(in: uri, options: [], range: range) != nil
+    }
+    
     public func validateCursor(_ cursor: String) -> Bool {
         let pattern = "^[a-zA-Z0-9+=/._%:-]+$"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
@@ -349,6 +356,39 @@ public final class ATProtoClient: ObservableObject {
         
         var urlComponents = URLComponents(url: baseURL.appendingPathComponent("app.bsky.feed.getTimeline"), resolvingAgainstBaseURL: true)!
         var queryItems = [URLQueryItem(name: "algorithm", value: "reverse-chronological")]
+        if let cursor = cursor {
+            let sanitizedCursor = cursor.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard validateCursor(sanitizedCursor) else {
+                throw NSError(domain: "ATProtoError", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid page reference token format."])
+            }
+            queryItems.append(URLQueryItem(name: "cursor", value: sanitizedCursor))
+        }
+        urlComponents.queryItems = queryItems
+        
+        var request = URLRequest(url: urlComponents.url!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(session.accessJwt)", forHTTPHeaderField: "Authorization")
+        
+        return try await executeRequestWithBackoff(request)
+    }
+    
+    public func fetchCustomTimeline(feedUri: String, cursor: String? = nil) async throws -> GetTimelineResponse {
+        let sanitizedUri = feedUri.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard validateFeedGeneratorURI(sanitizedUri) || useMockData else {
+            throw NSError(domain: "ATProtoError", code: 400, userInfo: [NSLocalizedDescriptionKey: "Insecure or malformed custom feed generator URI target."])
+        }
+        
+        if useMockData {
+            try await Task.sleep(nanoseconds: 500_000_000)
+            return generateMockTimeline()
+        }
+        
+        guard let session = session else {
+            throw URLError(.notConnectedToInternet)
+        }
+        
+        var urlComponents = URLComponents(url: baseURL.appendingPathComponent("app.bsky.feed.getFeed"), resolvingAgainstBaseURL: true)!
+        var queryItems = [URLQueryItem(name: "feed", value: sanitizedUri)]
         if let cursor = cursor {
             let sanitizedCursor = cursor.trimmingCharacters(in: .whitespacesAndNewlines)
             guard validateCursor(sanitizedCursor) else {

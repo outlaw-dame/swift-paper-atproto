@@ -2,6 +2,22 @@ import ObjectBox
 import Foundation
 import Combine
 
+public struct CustomFeed: Codable, Hashable {
+    public let uri: String
+    public let displayName: String
+    public let description: String
+    public let avatar: String
+    public var isPinned: Bool
+    
+    public init(uri: String, displayName: String, description: String, avatar: String, isPinned: Bool) {
+        self.uri = uri
+        self.displayName = displayName
+        self.description = description
+        self.avatar = avatar
+        self.isPinned = isPinned
+    }
+}
+
 @MainActor
 public final class LocalStore: ObservableObject {
     @Published public var cachedFeed: [FeedViewPost] = []
@@ -10,16 +26,19 @@ public final class LocalStore: ObservableObject {
     @Published public var localAbuseScores: [String: Double] = [:]
     @Published public var lastTransactionDurationMs: Double = 0.0
     @Published public var pendingOutboxCount: Int = 0
+    @Published public var pinnedFeeds: [CustomFeed] = []
     
     private var store: Store?
     private var postBox: Box<CachedPostEntity>?
     private var outboxBox: Box<OutboxActionEntity>?
+    private var feedBox: Box<CustomFeedEntity>?
     
     public init() {
         initializeStore()
         loadFromDatabase()
         evictOldUnbookmarkedPosts()
         updatePendingOutboxCount()
+        loadPinnedFeeds()
     }
     
     // Auxiliary initializer for unit testing using in-memory ObjectBox Prefix
@@ -29,12 +48,14 @@ public final class LocalStore: ObservableObject {
             if let store = store {
                 self.postBox = store.box(for: CachedPostEntity.self)
                 self.outboxBox = store.box(for: OutboxActionEntity.self)
+                self.feedBox = store.box(for: CustomFeedEntity.self)
             }
         } catch {
             print("Failed to initialize in-memory ObjectBox: \(error)")
         }
         loadFromDatabase()
         updatePendingOutboxCount()
+        loadPinnedFeeds()
     }
     
     private func initializeStore() {
@@ -50,6 +71,7 @@ public final class LocalStore: ObservableObject {
             if let store = store {
                 self.postBox = store.box(for: CachedPostEntity.self)
                 self.outboxBox = store.box(for: OutboxActionEntity.self)
+                self.feedBox = store.box(for: CustomFeedEntity.self)
             }
         } catch {
             print("Failed to initialize ObjectBox: \(error.localizedDescription)")
@@ -275,5 +297,108 @@ public final class LocalStore: ObservableObject {
             return
         }
         self.pendingOutboxCount = (try? box.count()) ?? 0
+    }
+    
+    // MARK: - Custom Feeds Storage & Algorithmic Sorting
+    
+    func subscribeToFeed(uri: String, displayName: String, description: String, avatar: String) {
+        guard let box = feedBox else { return }
+        do {
+            let entities = try box.all()
+            let existing = entities.first(where: { $0.uri == uri })
+            
+            let entity = CustomFeedEntity(
+                uri: uri,
+                displayName: displayName,
+                description: description,
+                avatar: avatar,
+                isPinned: existing?.isPinned ?? true,
+                isSubscribed: true
+            )
+            if let old = existing {
+                entity.id = old.id
+            }
+            try box.put(entity)
+        } catch {
+            print("Failed to subscribe to custom feed: \(error.localizedDescription)")
+        }
+        loadPinnedFeeds()
+    }
+    
+    func togglePinFeed(uri: String) {
+        guard let box = feedBox else { return }
+        do {
+            let entities = try box.all()
+            if let existing = entities.first(where: { $0.uri == uri }) {
+                existing.isPinned.toggle()
+                try box.put(existing)
+            }
+        } catch {
+            print("Failed to toggle pin state: \(error.localizedDescription)")
+        }
+        loadPinnedFeeds()
+    }
+    
+    func loadPinnedFeeds() {
+        guard let box = feedBox else { return }
+        do {
+            let entities = try box.all()
+            self.pinnedFeeds = entities.filter { $0.isPinned && $0.isSubscribed }.map {
+                CustomFeed(
+                    uri: $0.uri,
+                    displayName: $0.displayName,
+                    description: $0.feedDescription,
+                    avatar: $0.avatar,
+                    isPinned: $0.isPinned
+                )
+            }
+        } catch {
+            print("Failed to load pinned feeds: \(error.localizedDescription)")
+        }
+    }
+    
+    public func getLocalSortedFeed(for feedUri: String? = nil) -> [FeedViewPost] {
+        // Retrieve standard cached feed
+        let posts = cachedFeed
+        
+        let currentDate = Date()
+        let formatter = ISO8601DateFormatter()
+        
+        struct ScoredPost {
+            let post: FeedViewPost
+            let score: Double
+        }
+        
+        var scoredPosts: [ScoredPost] = []
+        
+        for item in posts {
+            // 1. Calculate recency decay score
+            var recencyScore = 0.5
+            if let postDate = formatter.date(from: item.post.record.createdAt) {
+                let delta = max(0.0, currentDate.timeIntervalSince(postDate))
+                // Decay divisor representing age decay rate (e.g. 24 hours)
+                recencyScore = 1.0 / (1.0 + (delta / 86400.0))
+            }
+            
+            // 2. Apply bookmark bonus and read penalty
+            let isSaved = savedPostUris.contains(item.post.uri)
+            let isRead = readPostUris.contains(item.post.uri)
+            let abuseScore = localAbuseScores[item.post.uri] ?? 0.0
+            
+            let bookmarkBonus = isSaved ? 0.35 : 0.0
+            let readPenalty = isRead ? 0.5 : 0.0
+            let abusePenalty = abuseScore
+            
+            let rawScore = recencyScore + bookmarkBonus - readPenalty - abusePenalty
+            
+            // Hardening: Clamp final score to [0.0, 1.0] to prevent overflow/underflow exploits
+            let clampedScore = max(0.0, min(1.0, rawScore))
+            
+            scoredPosts.append(ScoredPost(post: item, score: clampedScore))
+        }
+        
+        // Sort descending by score
+        let sorted = scoredPosts.sorted { $0.score > $1.score }.map { $0.post }
+        return sorted
     }
 }

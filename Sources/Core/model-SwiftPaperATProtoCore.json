@@ -150,9 +150,53 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "3:5955998459275001856",
+      "lastPropertyId": "7:6345507282819573248",
+      "name": "CustomFeedEntity",
+      "properties": [
+        {
+          "id": "1:7119755141635343872",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7782002610489864448",
+          "name": "uri",
+          "type": 9
+        },
+        {
+          "id": "3:8929152202499181568",
+          "name": "displayName",
+          "type": 9
+        },
+        {
+          "id": "4:3102976637030169088",
+          "name": "feedDescription",
+          "type": 9
+        },
+        {
+          "id": "5:3044805524189889792",
+          "name": "avatar",
+          "type": 9
+        },
+        {
+          "id": "6:4711517269688850176",
+          "name": "isPinned",
+          "type": 1
+        },
+        {
+          "id": "7:6345507282819573248",
+          "name": "isSubscribed",
+          "type": 1
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "2:5925817803454772992",
+  "lastEntityId": "3:5955998459275001856",
   "lastIndexId": "0:0",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
