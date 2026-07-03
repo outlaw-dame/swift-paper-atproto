@@ -11,12 +11,17 @@ let package = Package(
         .library(name: "SwiftPaperATProtoCore", targets: ["SwiftPaperATProtoCore"]),
         .executable(name: "swift-paper-atproto", targets: ["swift-paper-atproto"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/objectbox/objectbox-swift-spm.git", from: "4.0.0")
+    ],
     targets: [
         .target(
             name: "SwiftPaperATProtoCore",
-            dependencies: [],
-            path: "Sources/Core"
+            dependencies: [
+                .product(name: "ObjectBox.xcframework", package: "objectbox-swift-spm")
+            ],
+            path: "Sources/Core",
+            exclude: ["model-SwiftPaperATProtoCore.json"]
         ),
         .executableTarget(
             name: "swift-paper-atproto",

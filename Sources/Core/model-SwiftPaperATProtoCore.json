@@ -1,0 +1,137 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:5322533035072352768",
+      "lastPropertyId": "22:5149573903898599936",
+      "name": "CachedPostEntity",
+      "properties": [
+        {
+          "id": "1:3713420248862201856",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:3284299487935660800",
+          "name": "uri",
+          "type": 9
+        },
+        {
+          "id": "3:5374747489309035776",
+          "name": "cid",
+          "type": 9
+        },
+        {
+          "id": "4:6191497627755416064",
+          "name": "authorDid",
+          "type": 9
+        },
+        {
+          "id": "5:1362111370511290112",
+          "name": "authorHandle",
+          "type": 9
+        },
+        {
+          "id": "6:7354406130303424512",
+          "name": "authorDisplayName",
+          "type": 9
+        },
+        {
+          "id": "7:7849087965115020544",
+          "name": "authorAvatar",
+          "type": 9
+        },
+        {
+          "id": "8:4426258536157592576",
+          "name": "text",
+          "type": 9
+        },
+        {
+          "id": "9:1342116696713779456",
+          "name": "createdAt",
+          "type": 9
+        },
+        {
+          "id": "10:690218762273127936",
+          "name": "likeCount",
+          "type": 6
+        },
+        {
+          "id": "11:3639687886344543488",
+          "name": "replyCount",
+          "type": 6
+        },
+        {
+          "id": "12:7881804541460733952",
+          "name": "repostCount",
+          "type": 6
+        },
+        {
+          "id": "13:6960558265693307904",
+          "name": "indexedAt",
+          "type": 9
+        },
+        {
+          "id": "14:7554181504210117632",
+          "name": "isSaved",
+          "type": 1
+        },
+        {
+          "id": "15:8300531260535375360",
+          "name": "isRead",
+          "type": 1
+        },
+        {
+          "id": "16:2867624284589171200",
+          "name": "localAbuseScore",
+          "type": 8
+        },
+        {
+          "id": "17:8873590641820877056",
+          "name": "externalUri",
+          "type": 9
+        },
+        {
+          "id": "18:4674677728696803840",
+          "name": "externalTitle",
+          "type": 9
+        },
+        {
+          "id": "19:1674986707777005312",
+          "name": "externalDescription",
+          "type": 9
+        },
+        {
+          "id": "20:4717700332511933696",
+          "name": "externalThumb",
+          "type": 9
+        },
+        {
+          "id": "21:4445592542173910784",
+          "name": "imageThumbsCsv",
+          "type": 9
+        },
+        {
+          "id": "22:5149573903898599936",
+          "name": "imageFullsCsv",
+          "type": 9
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "1:5322533035072352768",
+  "lastIndexId": "0:0",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 4,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [],
+  "retiredRelationUids": [],
+  "version": 1
+}
