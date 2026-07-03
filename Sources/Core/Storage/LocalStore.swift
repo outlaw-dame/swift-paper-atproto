@@ -9,14 +9,17 @@ public final class LocalStore: ObservableObject {
     @Published public var readPostUris: Set<String> = []
     @Published public var localAbuseScores: [String: Double] = [:]
     @Published public var lastTransactionDurationMs: Double = 0.0
+    @Published public var pendingOutboxCount: Int = 0
     
     private var store: Store?
     private var postBox: Box<CachedPostEntity>?
+    private var outboxBox: Box<OutboxActionEntity>?
     
     public init() {
         initializeStore()
         loadFromDatabase()
         evictOldUnbookmarkedPosts()
+        updatePendingOutboxCount()
     }
     
     // Auxiliary initializer for unit testing using in-memory ObjectBox Prefix
@@ -25,11 +28,13 @@ public final class LocalStore: ObservableObject {
             self.store = try Store(directoryPath: Store.inMemoryPrefix + inMemoryName)
             if let store = store {
                 self.postBox = store.box(for: CachedPostEntity.self)
+                self.outboxBox = store.box(for: OutboxActionEntity.self)
             }
         } catch {
             print("Failed to initialize in-memory ObjectBox: \(error)")
         }
         loadFromDatabase()
+        updatePendingOutboxCount()
     }
     
     private func initializeStore() {
@@ -44,6 +49,7 @@ public final class LocalStore: ObservableObject {
             self.store = try Store(directoryPath: directory.path)
             if let store = store {
                 self.postBox = store.box(for: CachedPostEntity.self)
+                self.outboxBox = store.box(for: OutboxActionEntity.self)
             }
         } catch {
             print("Failed to initialize ObjectBox: \(error.localizedDescription)")
@@ -229,5 +235,45 @@ public final class LocalStore: ObservableObject {
     
     public func isRead(uri: String) -> Bool {
         readPostUris.contains(uri)
+    }
+    
+    // MARK: - Offline Outbox Operations
+    
+    func queueOutboxAction(type: String, payloadJson: String) {
+        guard let box = outboxBox else { return }
+        do {
+            let action = OutboxActionEntity(
+                actionType: type,
+                payloadJson: payloadJson,
+                createdAt: ISO8601DateFormatter().string(from: Date())
+            )
+            try box.put(action)
+        } catch {
+            print("Failed to queue outbox action: \(error.localizedDescription)")
+        }
+        updatePendingOutboxCount()
+    }
+    
+    func getAllPendingActions() -> [OutboxActionEntity] {
+        guard let box = outboxBox else { return [] }
+        return (try? box.all()) ?? []
+    }
+    
+    func removeOutboxAction(id: Id) {
+        guard let box = outboxBox else { return }
+        do {
+            try box.remove(id)
+        } catch {
+            print("Failed to remove outbox action: \(error.localizedDescription)")
+        }
+        updatePendingOutboxCount()
+    }
+    
+    func updatePendingOutboxCount() {
+        guard let box = outboxBox else {
+            self.pendingOutboxCount = 0
+            return
+        }
+        self.pendingOutboxCount = (try? box.count()) ?? 0
     }
 }

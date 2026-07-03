@@ -121,9 +121,38 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "2:5925817803454772992",
+      "lastPropertyId": "4:4079471536940395008",
+      "name": "OutboxActionEntity",
+      "properties": [
+        {
+          "id": "1:9040406202272965120",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:4395322439455836416",
+          "name": "actionType",
+          "type": 9
+        },
+        {
+          "id": "3:1537627617565102080",
+          "name": "payloadJson",
+          "type": 9
+        },
+        {
+          "id": "4:4079471536940395008",
+          "name": "createdAt",
+          "type": 9
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "1:5322533035072352768",
+  "lastEntityId": "2:5925817803454772992",
   "lastIndexId": "0:0",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",

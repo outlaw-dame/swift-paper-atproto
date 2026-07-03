@@ -1,6 +1,11 @@
 import Foundation
 import Combine
 
+public struct AccountSession: Codable, Hashable {
+    public let handle: String
+    public let did: String
+}
+
 @MainActor
 public final class ATProtoClient: ObservableObject {
     @Published public var session: CreateSessionResponse? = nil
@@ -9,20 +14,22 @@ public final class ATProtoClient: ObservableObject {
     @Published public var errorMessage: String? = nil
     @Published public var useMockData = true
     
+    // Multi-Account switcher lists
+    @Published public var loggedInAccounts: [String] = []
+    
     private let baseURL = URL(string: "https://bsky.social/xrpc")!
     
-    // Keychain keys
-    private let accessJwtKey = "atproto_access_jwt"
-    private let refreshJwtKey = "atproto_refresh_jwt"
-    private let handleKey = "atproto_user_handle"
-    private let didKey = "atproto_user_did"
+    // Global keys
+    private let accountsIndexKey = "atproto_accounts_index"
+    private let activeHandleKey = "atproto_active_handle"
+    
     private var isRefreshingSession = false
     
     public init() {
         restoreSessionFromKeychain()
     }
     
-    // MARK: - Input Validation & Sanitization (Adversarial Hardening)
+    // MARK: - Input Validation & Sanitization
     
     public func validateHandle(_ handle: String) -> Bool {
         let pattern = "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,10}$"
@@ -46,20 +53,63 @@ public final class ATProtoClient: ObservableObject {
     }
     
     public func validateCursor(_ cursor: String) -> Bool {
-        // Alphanumeric, equals (base64 padding), slashes, dashes, colons, dots, percents (encoded)
         let pattern = "^[a-zA-Z0-9+=/._%:-]+$"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
         let range = NSRange(location: 0, length: cursor.utf16.count)
         return regex.firstMatch(in: cursor, options: [], range: range) != nil
     }
     
-    // MARK: - Keychain Session Storage
+    // MARK: - Multi-Account Keychain Persistence
     
     private func restoreSessionFromKeychain() {
-        guard let access = KeychainHelper.get(key: accessJwtKey),
-              let refresh = KeychainHelper.get(key: refreshJwtKey),
-              let handle = KeychainHelper.get(key: handleKey),
-              let did = KeychainHelper.get(key: didKey) else {
+        // Load active accounts index
+        if let indexString = KeychainHelper.get(key: accountsIndexKey) {
+            self.loggedInAccounts = indexString.components(separatedBy: ",").filter { !$0.isEmpty }
+        }
+        
+        guard let activeHandle = KeychainHelper.get(key: activeHandleKey),
+              let access = KeychainHelper.get(key: "atproto_\(activeHandle)_access_jwt"),
+              let refresh = KeychainHelper.get(key: "atproto_\(activeHandle)_refresh_jwt"),
+              let did = KeychainHelper.get(key: "atproto_\(activeHandle)_did") else {
+            return
+        }
+        
+        self.session = CreateSessionResponse(
+            did: did,
+            handle: activeHandle,
+            email: nil,
+            accessJwt: access,
+            refreshJwt: refresh
+        )
+        self.isAuthenticated = true
+        self.useMockData = false
+    }
+    
+    private func persistSessionToKeychain(_ session: CreateSessionResponse) {
+        let handle = session.handle
+        
+        // Save account-specific credentials
+        KeychainHelper.save(key: "atproto_\(handle)_access_jwt", value: session.accessJwt)
+        KeychainHelper.save(key: "atproto_\(handle)_refresh_jwt", value: session.refreshJwt)
+        KeychainHelper.save(key: "atproto_\(handle)_did", value: session.did)
+        
+        // Save active account reference
+        KeychainHelper.save(key: activeHandleKey, value: handle)
+        
+        // Update index list
+        if !loggedInAccounts.contains(handle) {
+            loggedInAccounts.append(handle)
+            let indexString = loggedInAccounts.joined(separator: ",")
+            KeychainHelper.save(key: accountsIndexKey, value: indexString)
+        }
+    }
+    
+    public func switchAccount(to handle: String) {
+        guard loggedInAccounts.contains(handle) else { return }
+        
+        guard let access = KeychainHelper.get(key: "atproto_\(handle)_access_jwt"),
+              let refresh = KeychainHelper.get(key: "atproto_\(handle)_refresh_jwt"),
+              let did = KeychainHelper.get(key: "atproto_\(handle)_did") else {
             return
         }
         
@@ -71,21 +121,35 @@ public final class ATProtoClient: ObservableObject {
             refreshJwt: refresh
         )
         self.isAuthenticated = true
-        self.useMockData = false // Session restored -> prioritize live API calls
+        KeychainHelper.save(key: activeHandleKey, value: handle)
+        self.useMockData = false
     }
     
-    private func persistSessionToKeychain(_ session: CreateSessionResponse) {
-        KeychainHelper.save(key: accessJwtKey, value: session.accessJwt)
-        KeychainHelper.save(key: refreshJwtKey, value: session.refreshJwt)
-        KeychainHelper.save(key: handleKey, value: session.handle)
-        KeychainHelper.save(key: didKey, value: session.did)
-    }
-    
-    private func clearSessionFromKeychain() {
-        KeychainHelper.delete(key: accessJwtKey)
-        KeychainHelper.delete(key: refreshJwtKey)
-        KeychainHelper.delete(key: handleKey)
-        KeychainHelper.delete(key: didKey)
+    private func clearAccountFromKeychain(handle: String) {
+        // Delete credentials
+        KeychainHelper.delete(key: "atproto_\(handle)_access_jwt")
+        KeychainHelper.delete(key: "atproto_\(handle)_refresh_jwt")
+        KeychainHelper.delete(key: "atproto_\(handle)_did")
+        
+        // Remove from index
+        if let idx = loggedInAccounts.firstIndex(of: handle) {
+            loggedInAccounts.remove(at: idx)
+            let indexString = loggedInAccounts.joined(separator: ",")
+            KeychainHelper.save(key: accountsIndexKey, value: indexString)
+        }
+        
+        // Clear active pointer if deleted active account
+        if KeychainHelper.get(key: activeHandleKey) == handle {
+            KeychainHelper.delete(key: activeHandleKey)
+            
+            // Switch to remaining logged in account if available
+            if let firstRemaining = loggedInAccounts.first {
+                switchAccount(to: firstRemaining)
+            } else {
+                self.session = nil
+                self.isAuthenticated = false
+            }
+        }
     }
     
     private func refreshSession() async throws {
@@ -96,13 +160,12 @@ public final class ATProtoClient: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("Bearer \(session.refreshJwt)", forHTTPHeaderField: "Authorization")
         
-        // Execute refresh using raw backoff request directly
         let response: CreateSessionResponse = try await executeRequestWithBackoff(request)
         self.session = response
         persistSessionToKeychain(response)
     }
     
-    // MARK: - Exponential Backoff Wrapper
+    // MARK: - Exponential Backoff Request Executor
     
     private func executeRequestWithBackoff<T: Decodable>(
         _ request: URLRequest,
@@ -125,7 +188,6 @@ public final class ATProtoClient: ObservableObject {
                     return try decoder.decode(T.self, from: data)
                 }
                 
-                // Intercept 401 Unauthorized errors to automatically refresh the session (Self-Healing Auth)
                 if httpResponse.statusCode == 401 {
                     if !isRefreshingSession {
                         isRefreshingSession = true
@@ -138,12 +200,15 @@ public final class ATProtoClient: ObservableObject {
                             }
                             return try await executeRequestWithBackoff(newRequest)
                         } catch {
-                            logout()
+                            if let handle = self.session?.handle {
+                                logout(handle: handle)
+                            }
                             throw NSError(domain: "ATProtoError", code: 401, userInfo: [NSLocalizedDescriptionKey: "Your session has expired. Please sign in again."])
                         }
                     } else {
-                        // The refresh request itself returned 401 -> force logout to prevent loops
-                        logout()
+                        if let handle = self.session?.handle {
+                            logout(handle: handle)
+                        }
                         throw NSError(domain: "ATProtoError", code: 401, userInfo: [NSLocalizedDescriptionKey: "Authentication token invalid or revoked."])
                     }
                 }
@@ -156,7 +221,6 @@ public final class ATProtoClient: ObservableObject {
                     continue
                 }
                 
-                // Sanitize server errors to prevent stack trace leaks
                 if let errorJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let message = errorJSON["message"] as? String {
                     let sanitizedMessage = message.components(separatedBy: "stack:").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Network request failed."
@@ -203,10 +267,10 @@ public final class ATProtoClient: ObservableObject {
             return
         }
         
-        if useMockData || sanitizedHandle.lowercased() == "mock" {
+        if useMockData || sanitizedHandle.lowercased() == "mock" || sanitizedHandle.lowercased().starts(with: "mock") {
             try? await Task.sleep(nanoseconds: 800_000_000)
             let mockSession = CreateSessionResponse(
-                did: "did:plc:mockuser12345",
+                did: "did:plc:mock_\(sanitizedHandle.isEmpty ? "user" : sanitizedHandle)",
                 handle: sanitizedHandle.isEmpty ? "mockuser.bsky.social" : sanitizedHandle,
                 email: "mock@example.com",
                 accessJwt: "mock_jwt_access_token",
@@ -243,8 +307,19 @@ public final class ATProtoClient: ObservableObject {
     
     // MARK: - Actions: Logout
     
-    public func logout() {
-        clearSessionFromKeychain()
+    public func logout(handle: String) {
+        clearAccountFromKeychain(handle: handle)
+        self.errorMessage = nil
+    }
+    
+    public func logoutAll() {
+        let accounts = loggedInAccounts
+        for acc in accounts {
+            clearAccountFromKeychain(handle: acc)
+        }
+        KeychainHelper.delete(key: accountsIndexKey)
+        KeychainHelper.delete(key: activeHandleKey)
+        self.loggedInAccounts = []
         self.session = nil
         self.isAuthenticated = false
         self.errorMessage = nil
@@ -306,7 +381,106 @@ public final class ATProtoClient: ObservableObject {
         return try await executeRequestWithBackoff(request)
     }
     
-    // MARK: - Mock Generator Helper
+    // MARK: - Offline Outbox Publishing & Background Sync Work
+    
+    public func createPost(text: String, using store: LocalStore) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        
+        let payload: [String: String] = [
+            "text": trimmed,
+            "createdAt": ISO8601DateFormatter().string(from: Date())
+        ]
+        
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        
+        // If offline (mock offline mode) or network unavailable, queue action in database
+        if useMockData {
+            store.queueOutboxAction(type: "post", payloadJson: jsonString)
+            print("Offline Outbox: queued post locally in database.")
+            return
+        }
+        
+        // Online: attempt HTTP publish directly
+        do {
+            try await publishPostRecord(text: trimmed)
+        } catch {
+            // Self-healing fallback: if HTTP post fails due to network outage, queue it offline
+            store.queueOutboxAction(type: "post", payloadJson: jsonString)
+            print("Network failure. Offline fallback: queued post locally in database.")
+        }
+    }
+    
+    private func publishPostRecord(text: String) async throws {
+        guard let session = session else { throw URLError(.notConnectedToInternet) }
+        
+        let postURL = baseURL.appendingPathComponent("com.atproto.repo.createRecord")
+        var request = URLRequest(url: postURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(session.accessJwt)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = [
+            "repo": session.did,
+            "collection": "app.bsky.feed.post",
+            "record": [
+                "$type": "app.bsky.feed.post",
+                "text": text,
+                "createdAt": ISO8601DateFormatter().string(from: Date())
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        // Fire request with exponential backoff retry parameters
+        let _: EmptyDecodableResponse = try await executeRequestWithBackoff(request)
+    }
+    
+    public func flushOutbox(using store: LocalStore) async {
+        guard !useMockData, isAuthenticated else { return }
+        
+        let pending = store.getAllPendingActions()
+        guard !pending.isEmpty else { return }
+        
+        print("Outbox Sync: resolving \(pending.count) queued actions...")
+        
+        for action in pending {
+            guard let data = action.payloadJson.data(using: .utf8),
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let text = payload["text"] as? String else {
+                // Self-healing: purge corrupt JSON payloads instantly to prevent sync blocks
+                store.removeOutboxAction(id: action.id)
+                continue
+            }
+            
+            do {
+                try await publishPostRecord(text: text)
+                store.removeOutboxAction(id: action.id)
+                print("Outbox Sync: successfully published action ID \(action.id)")
+            } catch {
+                // If failed due to network connection loss, pause sync (try again later)
+                let nsError = error as NSError
+                let isConnectionLoss = nsError.domain == NSURLErrorDomain && 
+                    (nsError.code == URLError.notConnectedToInternet.rawValue ||
+                     nsError.code == URLError.networkConnectionLost.rawValue)
+                if isConnectionLoss {
+                    print("Outbox Sync: sync paused due to network disconnect.")
+                    break
+                }
+                
+                // If failed due to permanent data errors (e.g. text violates character limits), purge it
+                store.removeOutboxAction(id: action.id)
+                print("Outbox Sync: purged invalid post action ID \(action.id) - Error: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Empty Decodable Helper
+    private struct EmptyDecodableResponse: Decodable {}
+    
+    // MARK: - Mock Generator Helpers
     private func generateMockTimeline() -> GetTimelineResponse {
         let authors = [
             ProfileViewBasic(did: "did:plc:1", handle: "alice.bsky.social", displayName: "Alice Smith", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150"),

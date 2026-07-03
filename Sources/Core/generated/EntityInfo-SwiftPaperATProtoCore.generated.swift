@@ -8,6 +8,7 @@ import Foundation
 // MARK: - Entity metadata
 
 extension CachedPostEntity: ObjectBox.Entity {}
+extension OutboxActionEntity: ObjectBox.Entity {}
 
 extension CachedPostEntity: ObjectBox.__EntityRelatable {
     internal typealias EntityType = CachedPostEntity
@@ -463,6 +464,143 @@ internal final class CachedPostEntityBinding: ObjectBox.EntityBinding, Sendable 
 }
 
 
+
+extension OutboxActionEntity: ObjectBox.__EntityRelatable {
+    internal typealias EntityType = OutboxActionEntity
+
+    internal var _id: EntityId<OutboxActionEntity> {
+        return EntityId<OutboxActionEntity>(self.id.value)
+    }
+}
+
+extension OutboxActionEntity: ObjectBox.EntityInspectable {
+    internal typealias EntityBindingType = OutboxActionEntityBinding
+
+    /// Generated metadata used by ObjectBox to persist the entity.
+    internal static let entityInfo = ObjectBox.EntityInfo(name: "OutboxActionEntity", id: 2)
+
+    internal static let entityBinding = EntityBindingType()
+
+    fileprivate static func buildEntity(modelBuilder: ObjectBox.ModelBuilder) throws {
+        let entityBuilder = try modelBuilder.entityBuilder(for: OutboxActionEntity.self, id: 2, uid: 5925817803454772992)
+        try entityBuilder.addProperty(name: "id", type: PropertyType.long, flags: [.id], id: 1, uid: 9040406202272965120)
+        try entityBuilder.addProperty(name: "actionType", type: PropertyType.string, id: 2, uid: 4395322439455836416)
+        try entityBuilder.addProperty(name: "payloadJson", type: PropertyType.string, id: 3, uid: 1537627617565102080)
+        try entityBuilder.addProperty(name: "createdAt", type: PropertyType.string, id: 4, uid: 4079471536940395008)
+
+        try entityBuilder.lastProperty(id: 4, uid: 4079471536940395008)
+    }
+}
+
+extension OutboxActionEntity {
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { OutboxActionEntity.id == myId }
+    internal static var id: Property<OutboxActionEntity, Id, Id> { return Property<OutboxActionEntity, Id, Id>(propertyId: 1, isPrimaryKey: true) }
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { OutboxActionEntity.actionType.startsWith("X") }
+    internal static var actionType: Property<OutboxActionEntity, String, Void> { return Property<OutboxActionEntity, String, Void>(propertyId: 2, isPrimaryKey: false) }
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { OutboxActionEntity.payloadJson.startsWith("X") }
+    internal static var payloadJson: Property<OutboxActionEntity, String, Void> { return Property<OutboxActionEntity, String, Void>(propertyId: 3, isPrimaryKey: false) }
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { OutboxActionEntity.createdAt.startsWith("X") }
+    internal static var createdAt: Property<OutboxActionEntity, String, Void> { return Property<OutboxActionEntity, String, Void>(propertyId: 4, isPrimaryKey: false) }
+
+    fileprivate func __setId(identifier: ObjectBox.Id) {
+        self.id = Id(identifier)
+    }
+}
+
+extension ObjectBox.Property where E == OutboxActionEntity {
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { .id == myId }
+
+    internal static var id: Property<OutboxActionEntity, Id, Id> { return Property<OutboxActionEntity, Id, Id>(propertyId: 1, isPrimaryKey: true) }
+
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { .actionType.startsWith("X") }
+
+    internal static var actionType: Property<OutboxActionEntity, String, Void> { return Property<OutboxActionEntity, String, Void>(propertyId: 2, isPrimaryKey: false) }
+
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { .payloadJson.startsWith("X") }
+
+    internal static var payloadJson: Property<OutboxActionEntity, String, Void> { return Property<OutboxActionEntity, String, Void>(propertyId: 3, isPrimaryKey: false) }
+
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { .createdAt.startsWith("X") }
+
+    internal static var createdAt: Property<OutboxActionEntity, String, Void> { return Property<OutboxActionEntity, String, Void>(propertyId: 4, isPrimaryKey: false) }
+
+}
+
+
+/// Generated service type to handle persisting and reading entity data. Exposed through `OutboxActionEntity.EntityBindingType`.
+internal final class OutboxActionEntityBinding: ObjectBox.EntityBinding, Sendable {
+    internal typealias EntityType = OutboxActionEntity
+    internal typealias IdType = Id
+
+    internal required init() {}
+
+    internal func generatorBindingVersion() -> Int { 1 }
+
+    internal func setEntityIdUnlessStruct(of entity: EntityType, to entityId: ObjectBox.Id) {
+        entity.__setId(identifier: entityId)
+    }
+
+    internal func entityId(of entity: EntityType) -> ObjectBox.Id {
+        return entity.id.value
+    }
+
+    internal func collect(fromEntity entity: EntityType, id: ObjectBox.Id,
+                                  propertyCollector: ObjectBox.FlatBufferBuilder, store: ObjectBox.Store) throws {
+        let propertyOffset_actionType = propertyCollector.prepare(string: entity.actionType)
+        let propertyOffset_payloadJson = propertyCollector.prepare(string: entity.payloadJson)
+        let propertyOffset_createdAt = propertyCollector.prepare(string: entity.createdAt)
+
+        propertyCollector.collect(id, at: 2 + 2 * 1)
+        propertyCollector.collect(dataOffset: propertyOffset_actionType, at: 2 + 2 * 2)
+        propertyCollector.collect(dataOffset: propertyOffset_payloadJson, at: 2 + 2 * 3)
+        propertyCollector.collect(dataOffset: propertyOffset_createdAt, at: 2 + 2 * 4)
+    }
+
+    internal func createEntity(entityReader: ObjectBox.FlatBufferReader, store: ObjectBox.Store) -> EntityType {
+        let entity = OutboxActionEntity()
+
+        entity.id = entityReader.read(at: 2 + 2 * 1)
+        entity.actionType = entityReader.read(at: 2 + 2 * 2)
+        entity.payloadJson = entityReader.read(at: 2 + 2 * 3)
+        entity.createdAt = entityReader.read(at: 2 + 2 * 4)
+
+        return entity
+    }
+}
+
+
 /// Helper function that allows calling Enum(rawValue: value) with a nil value, which will return nil.
 fileprivate func optConstruct<T: RawRepresentable>(_ type: T.Type, rawValue: T.RawValue?) -> T? {
     guard let rawValue = rawValue else { return nil }
@@ -474,7 +612,8 @@ fileprivate func optConstruct<T: RawRepresentable>(_ type: T.Type, rawValue: T.R
 fileprivate func cModel() throws -> OpaquePointer {
     let modelBuilder = try ObjectBox.ModelBuilder()
     try CachedPostEntity.buildEntity(modelBuilder: modelBuilder)
-    modelBuilder.lastEntity(id: 1, uid: 5322533035072352768)
+    try OutboxActionEntity.buildEntity(modelBuilder: modelBuilder)
+    modelBuilder.lastEntity(id: 2, uid: 5925817803454772992)
     return modelBuilder.finish()
 }
 

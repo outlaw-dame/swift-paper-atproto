@@ -77,6 +77,56 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Color.white.opacity(0.04))
                 
+                Section("Active Profiles") {
+                    if client.loggedInAccounts.isEmpty {
+                        Text("No active accounts. Sign in to add accounts.")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                    } else {
+                        ForEach(client.loggedInAccounts, id: \.self) { handle in
+                            HStack {
+                                Text(handle)
+                                    .font(.subheadline)
+                                Spacer()
+                                if client.session?.handle == handle {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if client.session?.handle != handle {
+                                    withAnimation {
+                                        client.switchAccount(to: handle)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .listRowBackground(Color.white.opacity(0.04))
+                
+                Section("Offline Outbox Queue") {
+                    HStack {
+                        Text("Pending Publications")
+                        Spacer()
+                        Text("\(store.pendingOutboxCount) posts queued")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if store.pendingOutboxCount > 0 {
+                        Button {
+                            Task {
+                                await client.flushOutbox(using: store)
+                            }
+                        } label: {
+                            Label("Sync Outbox Queue Now", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(client.useMockData)
+                    }
+                }
+                .listRowBackground(Color.white.opacity(0.04))
+                
                 Section("Local Intelligence Substrate") {
                     HStack {
                         Text("Active Classifiers")
