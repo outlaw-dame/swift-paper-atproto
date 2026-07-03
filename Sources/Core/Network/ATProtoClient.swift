@@ -16,6 +16,7 @@ public final class ATProtoClient: ObservableObject {
     private let refreshJwtKey = "atproto_refresh_jwt"
     private let handleKey = "atproto_user_handle"
     private let didKey = "atproto_user_did"
+    private var isRefreshingSession = false
     
     public init() {
         restoreSessionFromKeychain()
@@ -87,6 +88,20 @@ public final class ATProtoClient: ObservableObject {
         KeychainHelper.delete(key: didKey)
     }
     
+    private func refreshSession() async throws {
+        guard let session = session else { return }
+        
+        let refreshURL = baseURL.appendingPathComponent("com.atproto.server.refreshSession")
+        var request = URLRequest(url: refreshURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(session.refreshJwt)", forHTTPHeaderField: "Authorization")
+        
+        // Execute refresh using raw backoff request directly
+        let response: CreateSessionResponse = try await executeRequestWithBackoff(request)
+        self.session = response
+        persistSessionToKeychain(response)
+    }
+    
     // MARK: - Exponential Backoff Wrapper
     
     private func executeRequestWithBackoff<T: Decodable>(
@@ -108,6 +123,29 @@ public final class ATProtoClient: ObservableObject {
                 if httpResponse.statusCode == 200 {
                     let decoder = JSONDecoder()
                     return try decoder.decode(T.self, from: data)
+                }
+                
+                // Intercept 401 Unauthorized errors to automatically refresh the session (Self-Healing Auth)
+                if httpResponse.statusCode == 401 {
+                    if !isRefreshingSession {
+                        isRefreshingSession = true
+                        defer { isRefreshingSession = false }
+                        do {
+                            try await refreshSession()
+                            var newRequest = request
+                            if let access = self.session?.accessJwt {
+                                newRequest.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
+                            }
+                            return try await executeRequestWithBackoff(newRequest)
+                        } catch {
+                            logout()
+                            throw NSError(domain: "ATProtoError", code: 401, userInfo: [NSLocalizedDescriptionKey: "Your session has expired. Please sign in again."])
+                        }
+                    } else {
+                        // The refresh request itself returned 401 -> force logout to prevent loops
+                        logout()
+                        throw NSError(domain: "ATProtoError", code: 401, userInfo: [NSLocalizedDescriptionKey: "Authentication token invalid or revoked."])
+                    }
                 }
                 
                 let isTransientStatus = httpResponse.statusCode == 429 || httpResponse.statusCode == 503 || httpResponse.statusCode == 504

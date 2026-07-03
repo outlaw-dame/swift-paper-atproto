@@ -63,8 +63,8 @@ class CachedPostEntity {
                 self.externalThumb = external.thumb ?? ""
             }
             if let images = embed.images {
-                self.imageThumbsCsv = images.map { $0.thumb }.joined(separator: ",")
-                self.imageFullsCsv = images.map { $0.fullsize }.joined(separator: ",")
+                self.imageThumbsCsv = images.map { $0.thumb.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "" }.joined(separator: ",")
+                self.imageFullsCsv = images.map { $0.fullsize.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "" }.joined(separator: ",")
             }
         }
     }
@@ -84,8 +84,8 @@ class CachedPostEntity {
         )
         
         var embed: Embed? = nil
-        let thumbs = imageThumbsCsv.split(separator: ",").map(String.init)
-        let fulls = imageFullsCsv.split(separator: ",").map(String.init)
+        let thumbs = imageThumbsCsv.split(separator: ",").map(String.init).compactMap { $0.removingPercentEncoding }
+        let fulls = imageFullsCsv.split(separator: ",").map(String.init).compactMap { $0.removingPercentEncoding }
         
         if !thumbs.isEmpty {
             var embedImages: [EmbedImage] = []
