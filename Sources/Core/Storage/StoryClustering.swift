@@ -27,7 +27,9 @@ public final class StoryClustering {
     
     // MARK: - Query Intent Classifier
     public static func classifyQuery(_ query: String) -> SearchIntent {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Hardening: limit input length to 128 characters to prevent CPU resource hammering
+        let cleaned = String(query.prefix(128))
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         if trimmed.hasPrefix("@") || trimmed.hasPrefix("did:") {
             return .profileSearch
@@ -47,9 +49,11 @@ public final class StoryClustering {
         var stories: [GroupedStory] = []
         var processedPostUris = Set<String>()
         
-        // Helper to parse domain hostnames
+        // Helper to parse domain hostnames (Hardened with HTTP/HTTPS scheme verification)
         func getDomain(from urlString: String) -> String? {
-            guard let url = URL(string: urlString), let host = url.host else { return nil }
+            guard let url = URL(string: urlString),
+                  url.scheme == "http" || url.scheme == "https",
+                  let host = url.host else { return nil }
             return host.replacingOccurrences(of: "www.", with: "")
         }
         
