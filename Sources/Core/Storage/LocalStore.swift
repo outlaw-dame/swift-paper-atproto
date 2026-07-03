@@ -8,6 +8,7 @@ public final class LocalStore: ObservableObject {
     @Published public var savedPostUris: Set<String> = []
     @Published public var readPostUris: Set<String> = []
     @Published public var localAbuseScores: [String: Double] = [:]
+    @Published public var lastTransactionDurationMs: Double = 0.0
     
     private var store: Store?
     private var postBox: Box<CachedPostEntity>?
@@ -136,6 +137,7 @@ public final class LocalStore: ObservableObject {
     // MARK: - Cache Feed Timeline
     public func cacheFeed(_ feed: [FeedViewPost]) {
         guard let box = postBox else { return }
+        let startTime = CFAbsoluteTimeGetCurrent()
         
         do {
             let entities = try box.all()
@@ -171,6 +173,9 @@ public final class LocalStore: ObservableObject {
         } catch {
             print("Failed to cache feed records in ObjectBox: \(error.localizedDescription)")
         }
+        
+        let duration = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
+        self.lastTransactionDurationMs = duration
         
         loadFromDatabase()
         evictOldUnbookmarkedPosts() // Sweep cache for expired entries

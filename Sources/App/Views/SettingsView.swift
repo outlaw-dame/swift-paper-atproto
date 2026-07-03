@@ -55,6 +55,14 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     
+                    HStack {
+                        Text("ObjectBox DB Write Latency")
+                        Spacer()
+                        Text(String(format: "%.2f ms", store.lastTransactionDurationMs))
+                            .foregroundColor(.secondary)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    
                     Button(role: .destructive) {
                         showingClearAlert = true
                     } label: {
