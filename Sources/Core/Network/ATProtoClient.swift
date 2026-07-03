@@ -7,23 +7,122 @@ public final class ATProtoClient: ObservableObject {
     @Published public var isAuthenticated = false
     @Published public var isLoading = false
     @Published public var errorMessage: String? = nil
-    @Published public var useMockData = true // Enabled by default for easy demo/testing
+    @Published public var useMockData = true
     
     private let baseURL = URL(string: "https://bsky.social/xrpc")!
     
     public init() {}
     
-    // MARK: - Login
+    // MARK: - Input Validation & Sanitization (Adversarial Hardening)
+    
+    public func validateHandle(_ handle: String) -> Bool {
+        let pattern = "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,10}$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(location: 0, length: handle.utf16.count)
+        return regex.firstMatch(in: handle, options: [], range: range) != nil
+    }
+    
+    public func validateDID(_ did: String) -> Bool {
+        let pattern = "^did:[a-z0-9]+:[a-zA-Z0-9._%:-]+$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(location: 0, length: did.utf16.count)
+        return regex.firstMatch(in: did, options: [], range: range) != nil
+    }
+    
+    public func validatePostURI(_ uri: String) -> Bool {
+        let pattern = "^at://did:[a-z0-9]+:[a-zA-Z0-9._%:-]+/app\\.bsky\\.feed\\.post/[a-zA-Z0-9_-]+$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(location: 0, length: uri.utf16.count)
+        return regex.firstMatch(in: uri, options: [], range: range) != nil
+    }
+    
+    // MARK: - Exponential Backoff Wrapper (Self-Healing Connection)
+    
+    private func executeRequestWithBackoff<T: Decodable>(
+        _ request: URLRequest,
+        maxRetries: Int = 3,
+        initialDelay: TimeInterval = 1.0
+    ) async throws -> T {
+        var attempt = 0
+        
+        while true {
+            attempt += 1
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw URLError(.badServerResponse)
+                }
+                
+                if httpResponse.statusCode == 200 {
+                    let decoder = JSONDecoder()
+                    return try decoder.decode(T.self, from: data)
+                }
+                
+                // Inspect status code: retry on transient rate-limiting (429) or service outages (503/504)
+                let isTransientStatus = httpResponse.statusCode == 429 || httpResponse.statusCode == 503 || httpResponse.statusCode == 504
+                
+                if isTransientStatus && attempt < maxRetries {
+                    let delay = calculateDelay(attempt: attempt, initialDelay: initialDelay)
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                
+                // Persistent client/auth errors (400, 401, 403, 404): Fail fast, do not retry
+                if let errorJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let message = errorJSON["message"] as? String {
+                    throw NSError(domain: "ATProtoError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+                } else {
+                    throw NSError(domain: "ATProtoError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server returned code \(httpResponse.statusCode)"])
+                }
+                
+            } catch {
+                // If it's a transient networking error (timeouts, connection drops)
+                let nsError = error as NSError
+                let isTransientNetwork = nsError.domain == NSURLErrorDomain && 
+                    (nsError.code == URLError.timedOut.rawValue ||
+                     nsError.code == URLError.cannotConnectToHost.rawValue ||
+                     nsError.code == URLError.cannotFindHost.rawValue ||
+                     nsError.code == URLError.networkConnectionLost.rawValue)
+                
+                if isTransientNetwork && attempt < maxRetries {
+                    let delay = calculateDelay(attempt: attempt, initialDelay: initialDelay)
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                
+                throw error
+            }
+        }
+    }
+    
+    private func calculateDelay(attempt: Int, initialDelay: TimeInterval) -> TimeInterval {
+        // Exponential backoff: initialDelay * 2^(attempt-1)
+        let baseDelay = initialDelay * pow(2.0, Double(attempt - 1))
+        // Jitter: randomize within +/- 15% to prevent synchronized herd hammering
+        let jitter = Double.random(in: -0.15...0.15) * baseDelay
+        return baseDelay + jitter
+    }
+    
+    // MARK: - Actions: Login
+    
     public func login(handle: String, appPassword: String) async {
         isLoading = true
         errorMessage = nil
         
-        if useMockData || handle.lowercased() == "mock" {
-            // Mock login
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        // Input validation & sanitation to prevent SSRF/injection
+        let sanitizedHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !useMockData && !validateHandle(sanitizedHandle) {
+            self.errorMessage = "Invalid handle format. Please use standard domain layout."
+            self.isLoading = false
+            return
+        }
+        
+        if useMockData || sanitizedHandle.lowercased() == "mock" {
+            try? await Task.sleep(nanoseconds: 800_000_000)
             self.session = CreateSessionResponse(
                 did: "did:plc:mockuser12345",
-                handle: handle.isEmpty ? "mockuser.bsky.social" : handle,
+                handle: sanitizedHandle.isEmpty ? "mockuser.bsky.social" : sanitizedHandle,
                 email: "mock@example.com",
                 accessJwt: "mock_jwt_access_token",
                 refreshJwt: "mock_jwt_refresh_token"
@@ -40,47 +139,34 @@ public final class ATProtoClient: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
             let body: [String: String] = [
-                "identifier": handle,
+                "identifier": sanitizedHandle,
                 "password": appPassword
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw URLError(.badServerResponse)
-            }
-            
-            if httpResponse.statusCode == 200 {
-                let decoder = JSONDecoder()
-                let sessionResp = try decoder.decode(CreateSessionResponse.self, from: data)
-                self.session = sessionResp
-                self.isAuthenticated = true
-            } else {
-                if let errorJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let message = errorJSON["message"] as? String {
-                    self.errorMessage = message
-                } else {
-                    self.errorMessage = "Login failed with code \(httpResponse.statusCode)"
-                }
-            }
+            // Execute login with backoff (e.g. if authentication endpoints are busy)
+            let sessionResp: CreateSessionResponse = try await executeRequestWithBackoff(request)
+            self.session = sessionResp
+            self.isAuthenticated = true
         } catch {
             self.errorMessage = error.localizedDescription
         }
         isLoading = false
     }
     
-    // MARK: - Logout
+    // MARK: - Actions: Logout
+    
     public func logout() {
         self.session = nil
         self.isAuthenticated = false
         self.errorMessage = nil
     }
     
-    // MARK: - Fetch Timeline
+    // MARK: - Actions: Fetch Timeline
+    
     public func fetchTimeline(cursor: String? = nil) async throws -> GetTimelineResponse {
         if useMockData {
-            try await Task.sleep(nanoseconds: 800_000_000)
+            try await Task.sleep(nanoseconds: 500_000_000)
             return generateMockTimeline()
         }
         
@@ -91,7 +177,9 @@ public final class ATProtoClient: ObservableObject {
         var urlComponents = URLComponents(url: baseURL.appendingPathComponent("app.bsky.feed.getTimeline"), resolvingAgainstBaseURL: true)!
         var queryItems = [URLQueryItem(name: "algorithm", value: "reverse-chronological")]
         if let cursor = cursor {
-            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+            // Sanitize query parameter input to prevent parameter poisoning
+            let sanitizedCursor = cursor.trimmingCharacters(in: .whitespacesAndNewlines)
+            queryItems.append(URLQueryItem(name: "cursor", value: sanitizedCursor))
         }
         urlComponents.queryItems = queryItems
         
@@ -99,20 +187,19 @@ public final class ATProtoClient: ObservableObject {
         request.httpMethod = "GET"
         request.setValue("Bearer \(session.accessJwt)", forHTTPHeaderField: "Authorization")
         
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
-        
-        let decoder = JSONDecoder()
-        return try decoder.decode(GetTimelineResponse.self, from: data)
+        return try await executeRequestWithBackoff(request)
     }
     
-    // MARK: - Fetch Thread
+    // MARK: - Actions: Fetch Thread
+    
     public func fetchThread(postUri: String) async throws -> GetPostThreadResponse {
+        // Direct validation of ATProto URI before querying the network (Prevent Path Traversal/Injection)
+        guard validatePostURI(postUri) || useMockData else {
+            throw NSError(domain: "ATProtoError", code: 400, userInfo: [NSLocalizedDescriptionKey: "Malformed ATProtocol post URI reference."])
+        }
+        
         if useMockData {
-            try await Task.sleep(nanoseconds: 500_000_000)
+            try await Task.sleep(nanoseconds: 300_000_000)
             return generateMockThread(for: postUri)
         }
         
@@ -127,14 +214,7 @@ public final class ATProtoClient: ObservableObject {
         request.httpMethod = "GET"
         request.setValue("Bearer \(session.accessJwt)", forHTTPHeaderField: "Authorization")
         
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
-        
-        let decoder = JSONDecoder()
-        return try decoder.decode(GetPostThreadResponse.self, from: data)
+        return try await executeRequestWithBackoff(request)
     }
     
     // MARK: - Mock Generator Helper

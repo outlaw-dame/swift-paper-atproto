@@ -27,6 +27,11 @@ let package = Package(
             name: "swift-paper-atproto",
             dependencies: ["SwiftPaperATProtoCore"],
             path: "Sources/App"
+        ),
+        .testTarget(
+            name: "SwiftPaperATProtoCoreTests",
+            dependencies: ["SwiftPaperATProtoCore"],
+            path: "Tests"
         )
     ]
 )
