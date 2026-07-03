@@ -266,14 +266,10 @@ struct HeroPostCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 // Author row
                 HStack(spacing: 12) {
-                    if let avatar = feedItem.post.author.avatar, let avatarURL = URL(string: avatar) {
-                        AsyncImage(url: avatarURL) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            ProgressView()
-                        }
-                        .frame(width: 48, height: 48)
-                        .clipShape(Circle())
+                    if let avatar = feedItem.post.author.avatar {
+                        ProgressiveImageView(imageUrlString: avatar)
+                            .frame(width: 48, height: 48)
+                            .clipShape(Circle())
                     } else {
                         Image(systemName: "person.crop.circle.fill")
                             .font(.system(size: 48))
@@ -304,15 +300,16 @@ struct HeroPostCard: View {
                 
                 // Embed
                 if let embed = feedItem.post.embed {
-                    if let images = embed.images, !images.isEmpty, let imageURL = URL(string: images[0].thumb) {
-                        AsyncImage(url: imageURL) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            ProgressView()
-                        }
-                        .frame(maxHeight: 220)
-                        .cornerRadius(12)
-                        .clipped()
+                    if let images = embed.images, !images.isEmpty {
+                        ProgressiveImageView(imageUrlString: images[0].fullsize)
+                            .frame(maxHeight: 250)
+                            .cornerRadius(12)
+                            .clipped()
+                    } else if let video = embed.video {
+                        SafeVideoPlayerView(videoUrlString: video.playlist)
+                            .frame(maxHeight: 250)
+                            .cornerRadius(12)
+                            .clipped()
                     } else if let external = embed.external {
                         let isSafeUrl = validateWebURL(external.uri)
                         
@@ -412,14 +409,10 @@ struct PostCardThumbnail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                if let avatar = feedItem.post.author.avatar, let avatarURL = URL(string: avatar) {
-                    AsyncImage(url: avatarURL) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Circle().fill(Color.gray)
-                    }
-                    .frame(width: 24, height: 24)
-                    .clipShape(Circle())
+                if let avatar = feedItem.post.author.avatar {
+                    ProgressiveImageView(imageUrlString: avatar)
+                        .frame(width: 24, height: 24)
+                        .clipShape(Circle())
                 }
                 
                 Text(feedItem.post.author.displayName ?? feedItem.post.author.handle)

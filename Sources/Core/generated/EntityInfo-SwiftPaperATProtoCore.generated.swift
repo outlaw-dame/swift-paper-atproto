@@ -51,8 +51,10 @@ extension CachedPostEntity: ObjectBox.EntityInspectable {
         try entityBuilder.addProperty(name: "externalThumb", type: PropertyType.string, id: 20, uid: 4717700332511933696)
         try entityBuilder.addProperty(name: "imageThumbsCsv", type: PropertyType.string, id: 21, uid: 4445592542173910784)
         try entityBuilder.addProperty(name: "imageFullsCsv", type: PropertyType.string, id: 22, uid: 5149573903898599936)
+        try entityBuilder.addProperty(name: "videoPlaylistUrl", type: PropertyType.string, id: 23, uid: 9196379733427265280)
+        try entityBuilder.addProperty(name: "videoThumbnailUrl", type: PropertyType.string, id: 24, uid: 4403326334398934016)
 
-        try entityBuilder.lastProperty(id: 22, uid: 5149573903898599936)
+        try entityBuilder.lastProperty(id: 24, uid: 4403326334398934016)
     }
 }
 
@@ -189,6 +191,18 @@ extension CachedPostEntity {
     ///
     ///     box.query { CachedPostEntity.imageFullsCsv.startsWith("X") }
     internal static var imageFullsCsv: Property<CachedPostEntity, String, Void> { return Property<CachedPostEntity, String, Void>(propertyId: 22, isPrimaryKey: false) }
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { CachedPostEntity.videoPlaylistUrl.startsWith("X") }
+    internal static var videoPlaylistUrl: Property<CachedPostEntity, String, Void> { return Property<CachedPostEntity, String, Void>(propertyId: 23, isPrimaryKey: false) }
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { CachedPostEntity.videoThumbnailUrl.startsWith("X") }
+    internal static var videoThumbnailUrl: Property<CachedPostEntity, String, Void> { return Property<CachedPostEntity, String, Void>(propertyId: 24, isPrimaryKey: false) }
 
     fileprivate func __setId(identifier: ObjectBox.Id) {
         self.id = Id(identifier)
@@ -372,6 +386,22 @@ extension ObjectBox.Property where E == CachedPostEntity {
 
     internal static var imageFullsCsv: Property<CachedPostEntity, String, Void> { return Property<CachedPostEntity, String, Void>(propertyId: 22, isPrimaryKey: false) }
 
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { .videoPlaylistUrl.startsWith("X") }
+
+    internal static var videoPlaylistUrl: Property<CachedPostEntity, String, Void> { return Property<CachedPostEntity, String, Void>(propertyId: 23, isPrimaryKey: false) }
+
+    /// Generated entity property information.
+    ///
+    /// You may want to use this in queries to specify fetch conditions, for example:
+    ///
+    ///     box.query { .videoThumbnailUrl.startsWith("X") }
+
+    internal static var videoThumbnailUrl: Property<CachedPostEntity, String, Void> { return Property<CachedPostEntity, String, Void>(propertyId: 24, isPrimaryKey: false) }
+
 }
 
 
@@ -409,6 +439,8 @@ internal final class CachedPostEntityBinding: ObjectBox.EntityBinding, Sendable 
         let propertyOffset_externalThumb = propertyCollector.prepare(string: entity.externalThumb)
         let propertyOffset_imageThumbsCsv = propertyCollector.prepare(string: entity.imageThumbsCsv)
         let propertyOffset_imageFullsCsv = propertyCollector.prepare(string: entity.imageFullsCsv)
+        let propertyOffset_videoPlaylistUrl = propertyCollector.prepare(string: entity.videoPlaylistUrl)
+        let propertyOffset_videoThumbnailUrl = propertyCollector.prepare(string: entity.videoThumbnailUrl)
 
         propertyCollector.collect(id, at: 2 + 2 * 1)
         propertyCollector.collect(entity.likeCount, at: 2 + 2 * 10)
@@ -432,6 +464,8 @@ internal final class CachedPostEntityBinding: ObjectBox.EntityBinding, Sendable 
         propertyCollector.collect(dataOffset: propertyOffset_externalThumb, at: 2 + 2 * 20)
         propertyCollector.collect(dataOffset: propertyOffset_imageThumbsCsv, at: 2 + 2 * 21)
         propertyCollector.collect(dataOffset: propertyOffset_imageFullsCsv, at: 2 + 2 * 22)
+        propertyCollector.collect(dataOffset: propertyOffset_videoPlaylistUrl, at: 2 + 2 * 23)
+        propertyCollector.collect(dataOffset: propertyOffset_videoThumbnailUrl, at: 2 + 2 * 24)
     }
 
     internal func createEntity(entityReader: ObjectBox.FlatBufferReader, store: ObjectBox.Store) -> EntityType {
@@ -459,6 +493,8 @@ internal final class CachedPostEntityBinding: ObjectBox.EntityBinding, Sendable 
         entity.externalThumb = entityReader.read(at: 2 + 2 * 20)
         entity.imageThumbsCsv = entityReader.read(at: 2 + 2 * 21)
         entity.imageFullsCsv = entityReader.read(at: 2 + 2 * 22)
+        entity.videoPlaylistUrl = entityReader.read(at: 2 + 2 * 23)
+        entity.videoThumbnailUrl = entityReader.read(at: 2 + 2 * 24)
 
         return entity
     }

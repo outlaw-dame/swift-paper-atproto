@@ -33,6 +33,10 @@ class CachedPostEntity {
     // Comma-separated list of image fullsize URLs
     var imageFullsCsv: String = ""
     
+    // Video Embed Cache
+    var videoPlaylistUrl: String = ""
+    var videoThumbnailUrl: String = ""
+    
     // Parameter-less initializer required by ObjectBox
     init() {}
     
@@ -65,6 +69,10 @@ class CachedPostEntity {
             if let images = embed.images {
                 self.imageThumbsCsv = images.map { $0.thumb.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "" }.joined(separator: ",")
                 self.imageFullsCsv = images.map { $0.fullsize.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "" }.joined(separator: ",")
+            }
+            if let video = embed.video {
+                self.videoPlaylistUrl = video.playlist
+                self.videoThumbnailUrl = video.thumbnail ?? ""
             }
         }
     }
@@ -102,6 +110,12 @@ class CachedPostEntity {
                 thumb: externalThumb.isEmpty ? nil : externalThumb
             )
             embed = Embed(type: "app.bsky.embed.external", external: external)
+        } else if !videoPlaylistUrl.isEmpty {
+            let video = EmbedVideo(
+                playlist: videoPlaylistUrl,
+                thumbnail: videoThumbnailUrl.isEmpty ? nil : videoThumbnailUrl
+            )
+            embed = Embed(type: "app.bsky.embed.video", video: video)
         }
         
         let post = Post(

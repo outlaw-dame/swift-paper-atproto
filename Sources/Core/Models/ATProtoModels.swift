@@ -90,17 +90,30 @@ public struct Embed: Codable, Hashable {
     public let type: String? // Custom type mapper
     public let images: [EmbedImage]?
     public let external: EmbedExternal?
+    public let video: EmbedVideo?
     
     enum CodingKeys: String, CodingKey {
         case type = "$type"
         case images
         case external
+        case video
     }
     
-    public init(type: String? = nil, images: [EmbedImage]? = nil, external: EmbedExternal? = nil) {
+    public init(type: String? = nil, images: [EmbedImage]? = nil, external: EmbedExternal? = nil, video: EmbedVideo? = nil) {
         self.type = type
         self.images = images
         self.external = external
+        self.video = video
+    }
+}
+
+public struct EmbedVideo: Codable, Hashable {
+    public let playlist: String
+    public let thumbnail: String?
+    
+    public init(playlist: String, thumbnail: String?) {
+        self.playlist = playlist
+        self.thumbnail = thumbnail
     }
 }
 

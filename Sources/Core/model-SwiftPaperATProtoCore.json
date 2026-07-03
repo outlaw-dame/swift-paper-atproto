@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:5322533035072352768",
-      "lastPropertyId": "22:5149573903898599936",
+      "lastPropertyId": "24:4403326334398934016",
       "name": "CachedPostEntity",
       "properties": [
         {
@@ -117,6 +117,16 @@
         {
           "id": "22:5149573903898599936",
           "name": "imageFullsCsv",
+          "type": 9
+        },
+        {
+          "id": "23:9196379733427265280",
+          "name": "videoPlaylistUrl",
+          "type": 9
+        },
+        {
+          "id": "24:4403326334398934016",
+          "name": "videoThumbnailUrl",
           "type": 9
         }
       ],
