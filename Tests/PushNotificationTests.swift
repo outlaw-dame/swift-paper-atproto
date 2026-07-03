@@ -1,5 +1,5 @@
 import XCTest
-@testable import swift_paper_atproto
+@testable import SwiftPaperATProtoCore
 
 final class PushNotificationTests: XCTestCase {
     
