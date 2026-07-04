@@ -7,17 +7,99 @@ public struct CreateSessionResponse: Codable {
     public let email: String?
     public let accessJwt: String
     public let refreshJwt: String
-    
-    public init(did: String, handle: String, email: String? = nil, accessJwt: String, refreshJwt: String) {
+    /// Returned by getProfile; injected after session creation.
+    public var displayName: String?
+    public var avatar: String?
+
+    public init(
+        did: String,
+        handle: String,
+        email: String? = nil,
+        accessJwt: String,
+        refreshJwt: String,
+        displayName: String? = nil,
+        avatar: String? = nil
+    ) {
         self.did = did
         self.handle = handle
         self.email = email
         self.accessJwt = accessJwt
         self.refreshJwt = refreshJwt
+        self.displayName = displayName
+        self.avatar = avatar
     }
 }
 
 // MARK: - Profile Models
+
+/// Detailed profile record as returned by `app.bsky.actor.getProfile`.
+public struct ProfileViewDetailed: Codable, Hashable {
+    public let did: String
+    public let handle: String
+    public let displayName: String?
+    public let description: String?
+    public let avatar: String?
+    public let banner: String?
+    public let followersCount: Int?
+    public let followsCount: Int?
+    public let postsCount: Int?
+
+    public init(
+        did: String,
+        handle: String,
+        displayName: String? = nil,
+        description: String? = nil,
+        avatar: String? = nil,
+        banner: String? = nil,
+        followersCount: Int? = nil,
+        followsCount: Int? = nil,
+        postsCount: Int? = nil
+    ) {
+        self.did = did
+        self.handle = handle
+        self.displayName = displayName
+        self.description = description
+        self.avatar = avatar
+        self.banner = banner
+        self.followersCount = followersCount
+        self.followsCount = followsCount
+        self.postsCount = postsCount
+    }
+}
+
+/// The ATProto record stored in `app.bsky.actor.profile`.
+/// Used for both reading the current profile and constructing the `putRecord` body.
+public struct ProfileRecord: Codable {
+    public let type: String
+    public var displayName: String?
+    public var description: String?
+    /// avatar and banner fields use blob references when submitted to the API;
+    /// here we carry optional URL strings for the diagnostic / display layer.
+    public var avatarUrl: String?
+    public var bannerUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case displayName, description
+        case avatarUrl, bannerUrl
+    }
+
+    public init(
+        type: String = "app.bsky.actor.profile",
+        displayName: String? = nil,
+        description: String? = nil,
+        avatarUrl: String? = nil,
+        bannerUrl: String? = nil
+    ) {
+        self.type       = type
+        self.displayName = displayName
+        self.description = description
+        self.avatarUrl  = avatarUrl
+        self.bannerUrl  = bannerUrl
+    }
+}
+
+/// Lightweight summary used inside `ProfileViewBasic` feed cards.
 public struct ProfileViewBasic: Codable, Identifiable, Hashable {
     public var id: String { did }
     public let did: String

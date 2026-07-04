@@ -11,20 +11,24 @@ public final class ATProtoClient: ObservableObject {
     @Published public var session: CreateSessionResponse? = nil
     @Published public var isAuthenticated = false
     @Published public var isLoading = false
+    @Published public var isUpdatingProfile = false
     @Published public var errorMessage: String? = nil
     @Published public var useMockData = true
-    
+
     // Multi-Account switcher lists
     @Published public var loggedInAccounts: [String] = []
-    
+
     private let baseURL = URL(string: "https://bsky.social/xrpc")!
-    
+
+    // Phase 9: Shared DID resolver (actor-isolated).
+    public let didResolver = DIDResolver()
+
     // Global keys
     private let accountsIndexKey = "atproto_accounts_index"
-    private let activeHandleKey = "atproto_active_handle"
-    
+    private let activeHandleKey  = "atproto_active_handle"
+
     private var isRefreshingSession = false
-    private var isFlushingOutbox = false
+    private var isFlushingOutbox    = false
     
     public init() {
         restoreSessionFromKeychain()
@@ -431,6 +435,154 @@ public final class ATProtoClient: ObservableObject {
         return try await executeRequestWithBackoff(request)
     }
     
+    // MARK: - Convenience: no-arg logout (uses the current active session handle).
+
+    public func logout() {
+        guard let handle = session?.handle else {
+            // No session — just reset state.
+            self.session = nil
+            self.isAuthenticated = false
+            self.errorMessage = nil
+            return
+        }
+        logout(handle: handle)
+    }
+
+    // MARK: - Phase 9: Profile Fetch
+
+    /// Fetches the full profile for the currently authenticated user.
+    ///
+    /// On success, `session.displayName` and `session.avatar` are updated in-place
+    /// so the Settings UI and header reflect the latest data without re-login.
+    @discardableResult
+    public func fetchProfile() async throws -> ProfileViewDetailed {
+        guard let session = session else { throw URLError(.notConnectedToInternet) }
+
+        if useMockData {
+            return ProfileViewDetailed(
+                did: session.did,
+                handle: session.handle,
+                displayName: "Mock Display Name",
+                description: "This is a locally generated mock profile for offline development.",
+                avatar: nil,
+                banner: nil,
+                followersCount: 42,
+                followsCount: 17,
+                postsCount: 108
+            )
+        }
+
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("app.bsky.actor.getProfile"),
+            resolvingAgainstBaseURL: true
+        )!
+        // actor parameter must be a valid DID or validated handle.
+        let actor = session.did
+        guard validateDID(actor) else {
+            throw NSError(domain: "ATProtoError", code: 400,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid actor DID in current session."])
+        }
+        components.queryItems = [URLQueryItem(name: "actor", value: actor)]
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(session.accessJwt)", forHTTPHeaderField: "Authorization")
+
+        let profile: ProfileViewDetailed = try await executeRequestWithBackoff(request)
+
+        // Inject the fresh avatar and displayName back into the live session.
+        self.session?.displayName = profile.displayName
+        if let avatarURL = profile.avatar,
+           ATProtoURLValidator.isAllowedMediaURL(avatarURL) {
+            self.session?.avatar = avatarURL
+        }
+
+        return profile
+    }
+
+    // MARK: - Phase 9: Profile Update (putRecord)
+
+    /// Updates the authenticated user's profile record via `com.atproto.repo.putRecord`.
+    ///
+    /// - Parameters:
+    ///   - displayName: New display name (1–64 chars). nil = leave unchanged.
+    ///   - description: New bio/description (0–256 chars). nil = leave unchanged.
+    ///
+    /// Security: displayName and description are stripped of leading/trailing whitespace
+    /// and hard-capped at length limits before sending. No raw HTML/script is accepted.
+    public func updateProfile(displayName: String?, description: String?) async throws {
+        guard let session = session else { throw URLError(.notConnectedToInternet) }
+        guard !useMockData else {
+            // In mock mode: simulate success by updating local session state.
+            if let dn = displayName {
+                let sanitized = sanitizeProfileText(dn, maxLength: 64)
+                self.session?.displayName = sanitized.isEmpty ? nil : sanitized
+            }
+            return
+        }
+
+        isUpdatingProfile = true
+        defer { isUpdatingProfile = false }
+
+        // Sanitise inputs.
+        let sanitizedDisplayName: String?
+        let sanitizedDescription: String?
+
+        if let dn = displayName {
+            let s = sanitizeProfileText(dn, maxLength: 64)
+            sanitizedDisplayName = s.isEmpty ? nil : s
+        } else {
+            sanitizedDisplayName = nil
+        }
+
+        if let desc = description {
+            let s = sanitizeProfileText(desc, maxLength: 256)
+            sanitizedDescription = s.isEmpty ? nil : s
+        } else {
+            sanitizedDescription = nil
+        }
+
+        guard validateDID(session.did) else {
+            throw NSError(domain: "ATProtoError", code: 400,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid DID in current session."])
+        }
+
+        let putURL = baseURL.appendingPathComponent("com.atproto.repo.putRecord")
+        var request = URLRequest(url: putURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(session.accessJwt)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Build the record body. Only include fields that are being updated.
+        var record: [String: Any] = ["$type": "app.bsky.actor.profile"]
+        if let dn = sanitizedDisplayName { record["displayName"] = dn }
+        if let desc = sanitizedDescription { record["description"] = desc }
+
+        let body: [String: Any] = [
+            "repo":       session.did,
+            "collection": "app.bsky.actor.profile",
+            "rkey":       "self",
+            "record":     record
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let _: EmptyDecodableResponse = try await executeRequestWithBackoff(request)
+
+        // Mirror the change locally.
+        self.session?.displayName = sanitizedDisplayName
+    }
+
+    /// Strips control characters, normalises whitespace, and hard-caps length.
+    private func sanitizeProfileText(_ text: String, maxLength: Int) -> String {
+        // Remove control characters (keeps printable + space + newline)
+        let stripped = text.unicodeScalars
+            .filter { !CharacterSet.controlCharacters.union(.illegalCharacters).contains($0) || $0 == "\n" }
+            .map { String($0) }
+            .joined()
+        return String(stripped.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+    }
+
     // MARK: - Offline Outbox Publishing & Background Sync Work
     
     public func createPost(text: String, using store: LocalStore) async {
