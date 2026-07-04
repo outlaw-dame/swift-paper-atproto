@@ -294,7 +294,7 @@ struct HeroPostCard: View {
                 }
                 
                 // Post Text
-                Text(feedItem.post.record.text)
+                Text(RichTextParser.format(text: feedItem.post.record.text, facets: feedItem.post.record.facets))
                     .font(.body)
                     .lineSpacing(4)
                 
@@ -429,7 +429,7 @@ struct PostCardThumbnail: View {
                 }
             }
             
-            Text(feedItem.post.record.text)
+            Text(RichTextParser.format(text: feedItem.post.record.text, facets: feedItem.post.record.facets))
                 .font(.caption2)
                 .lineLimit(3)
                 .foregroundColor(.secondary)

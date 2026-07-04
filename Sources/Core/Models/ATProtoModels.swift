@@ -160,10 +160,101 @@ public struct Post: Codable, Identifiable, Hashable {
 public struct PostRecord: Codable, Hashable {
     public let text: String
     public let createdAt: String
+    public let facets: [Facet]?
     
-    public init(text: String, createdAt: String) {
+    public init(text: String, createdAt: String, facets: [Facet]? = nil) {
         self.text = text
         self.createdAt = createdAt
+        self.facets = facets
+    }
+}
+
+public struct Facet: Codable, Hashable {
+    public let index: ByteSlice
+    public let features: [FacetFeature]
+    
+    public init(index: ByteSlice, features: [FacetFeature]) {
+        self.index = index
+        self.features = features
+    }
+}
+
+public struct ByteSlice: Codable, Hashable {
+    public let byteStart: Int
+    public let byteEnd: Int
+    
+    public init(byteStart: Int, byteEnd: Int) {
+        self.byteStart = byteStart
+        self.byteEnd = byteEnd
+    }
+    
+    /// Maps this byte-offset slice into a safe `Range<String.Index>` in the provided text.
+    /// Handles invalid bounds and character boundaries safely without crashing.
+    public func characterRange(in text: String) -> Range<String.Index>? {
+        let utf8 = text.utf8
+        guard byteStart >= 0, byteEnd >= byteStart, byteEnd <= utf8.count else { return nil }
+        
+        let startUTF8 = utf8.index(utf8.startIndex, offsetBy: byteStart)
+        let endUTF8 = utf8.index(utf8.startIndex, offsetBy: byteEnd)
+        
+        // Convert UTF-8 indices to String.Index
+        guard let start = String.Index(startUTF8, within: text),
+              let end = String.Index(endUTF8, within: text) else {
+            // Fails if the index falls in the middle of a multi-byte character.
+            return nil
+        }
+        
+        return start..<end
+    }
+}
+
+public enum FacetFeature: Codable, Hashable {
+    case mention(did: String)
+    case link(uri: String)
+    case tag(tag: String)
+    case unknown
+    
+    enum CodingKeys: String, CodingKey {
+        case type = "$type"
+        case did
+        case uri
+        case tag
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        
+        switch type {
+        case "app.bsky.richtext.facet#mention":
+            let did = try container.decode(String.self, forKey: .did)
+            self = .mention(did: did)
+        case "app.bsky.richtext.facet#link":
+            let uri = try container.decode(String.self, forKey: .uri)
+            self = .link(uri: uri)
+        case "app.bsky.richtext.facet#tag":
+            let tag = try container.decode(String.self, forKey: .tag)
+            self = .tag(tag: tag)
+        default:
+            self = .unknown
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .mention(let did):
+            try container.encode("app.bsky.richtext.facet#mention", forKey: .type)
+            try container.encode(did, forKey: .did)
+        case .link(let uri):
+            try container.encode("app.bsky.richtext.facet#link", forKey: .type)
+            try container.encode(uri, forKey: .uri)
+        case .tag(let tag):
+            try container.encode("app.bsky.richtext.facet#tag", forKey: .type)
+            try container.encode(tag, forKey: .tag)
+        case .unknown:
+            try container.encode("unknown", forKey: .type)
+        }
     }
 }
 

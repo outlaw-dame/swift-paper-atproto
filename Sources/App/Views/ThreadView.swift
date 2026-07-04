@@ -222,7 +222,7 @@ struct RootPostView: View {
                 .cornerRadius(6)
             }
             
-            Text(post.record.text)
+            Text(RichTextParser.format(text: post.record.text, facets: post.record.facets))
                 .font(.system(.body, design: .serif))
                 .lineSpacing(6)
             
@@ -296,7 +296,7 @@ struct ReplyNodeView: View {
                         }
                         
                         if !isCollapsed {
-                            Text(post.record.text)
+                            Text(RichTextParser.format(text: post.record.text, facets: post.record.facets))
                                 .font(.caption)
                                 .lineSpacing(3)
                         }

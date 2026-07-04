@@ -5,7 +5,7 @@ struct DiscoveryView: View {
     @EnvironmentObject var store: LocalStore
     @EnvironmentObject var client: ATProtoClient
     
-    @State private var searchText = ""
+    @EnvironmentObject var router: NavigationRouter
     @State private var selectedIntent: SearchIntent = .tagSearch
     @State private var stories: [GroupedStory] = []
     
@@ -19,16 +19,16 @@ struct DiscoveryView: View {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
-                        TextField("Search topics, handles, or intents...", text: $searchText)
+                        TextField("Search topics, handles, or intents...", text: $router.discoverySearchText)
                             .foregroundColor(.primary)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                            .onChange(of: searchText) { oldVal, newVal in
+                            .onChange(of: router.discoverySearchText) { oldVal, newVal in
                                 updateIntentClassification(for: newVal)
                             }
-                        if !searchText.isEmpty {
+                        if !router.discoverySearchText.isEmpty {
                             Button {
-                                searchText = ""
+                                router.discoverySearchText = ""
                                 updateIntentClassification(for: "")
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
@@ -142,8 +142,8 @@ struct DiscoveryView: View {
         var baseStories = stories
         
         // Filter by text search if matching
-        if !searchText.isEmpty {
-            let term = searchText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !router.discoverySearchText.isEmpty {
+            let term = router.discoverySearchText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             baseStories = baseStories.filter { story in
                 story.headline.lowercased().contains(term) ||
                 story.summary.lowercased().contains(term) ||

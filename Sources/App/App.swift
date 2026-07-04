@@ -5,6 +5,7 @@ import SwiftPaperATProtoCore
 struct SwiftPaperATProtoApp: App {
     @StateObject private var client = ATProtoClient()
     @StateObject private var store = LocalStore()
+    @StateObject private var router = NavigationRouter()
     
     var body: some Scene {
         WindowGroup {
@@ -23,6 +24,7 @@ struct SwiftPaperATProtoApp: App {
             .animation(.spring(response: 0.45, dampingFraction: 0.8), value: client.isAuthenticated)
             .environmentObject(client)
             .environmentObject(store)
+            .environmentObject(router)
             .preferredColorScheme(.dark)
         }
         #if os(macOS)

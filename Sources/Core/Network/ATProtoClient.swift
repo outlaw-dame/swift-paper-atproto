@@ -450,25 +450,26 @@ public final class ATProtoClient: ObservableObject {
 
     // MARK: - Phase 9: Profile Fetch
 
-    /// Fetches the full profile for the currently authenticated user.
+    /// Fetches the full profile for the specified user DID or handle (defaults to the currently authenticated user).
     ///
-    /// On success, `session.displayName` and `session.avatar` are updated in-place
-    /// so the Settings UI and header reflect the latest data without re-login.
+    /// On success, if the fetched profile belongs to the logged-in user, `session.displayName` and `session.avatar`
+    /// are updated in-place so the UI reflects the latest data without re-login.
     @discardableResult
-    public func fetchProfile() async throws -> ProfileViewDetailed {
+    public func fetchProfile(for actor: String? = nil) async throws -> ProfileViewDetailed {
         guard let session = session else { throw URLError(.notConnectedToInternet) }
+        let targetActor = actor ?? session.did
 
         if useMockData {
             return ProfileViewDetailed(
-                did: session.did,
-                handle: session.handle,
-                displayName: "Mock Display Name",
-                description: "This is a locally generated mock profile for offline development.",
+                did: targetActor.hasPrefix("did:") ? targetActor : "did:plc:mock_" + targetActor,
+                handle: targetActor.hasPrefix("did:") ? "mock.user.handle" : targetActor,
+                displayName: "Mock User (\(targetActor.prefix(8)))",
+                description: "This is a locally generated mock profile for offline development and testing.",
                 avatar: nil,
                 banner: nil,
-                followersCount: 42,
-                followsCount: 17,
-                postsCount: 108
+                followersCount: 142,
+                followsCount: 88,
+                postsCount: 99
             )
         }
 
@@ -477,12 +478,11 @@ public final class ATProtoClient: ObservableObject {
             resolvingAgainstBaseURL: true
         )!
         // actor parameter must be a valid DID or validated handle.
-        let actor = session.did
-        guard validateDID(actor) else {
+        guard validateDID(targetActor) || validateHandle(targetActor) else {
             throw NSError(domain: "ATProtoError", code: 400,
-                          userInfo: [NSLocalizedDescriptionKey: "Invalid actor DID in current session."])
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid actor DID or handle specified."])
         }
-        components.queryItems = [URLQueryItem(name: "actor", value: actor)]
+        components.queryItems = [URLQueryItem(name: "actor", value: targetActor)]
         guard let url = components.url else { throw URLError(.badURL) }
 
         var request = URLRequest(url: url)
@@ -491,11 +491,13 @@ public final class ATProtoClient: ObservableObject {
 
         let profile: ProfileViewDetailed = try await executeRequestWithBackoff(request)
 
-        // Inject the fresh avatar and displayName back into the live session.
-        self.session?.displayName = profile.displayName
-        if let avatarURL = profile.avatar,
-           ATProtoURLValidator.isAllowedMediaURL(avatarURL) {
-            self.session?.avatar = avatarURL
+        // Only inject back if it is our own profile.
+        if targetActor == session.did {
+            self.session?.displayName = profile.displayName
+            if let avatarURL = profile.avatar,
+               ATProtoURLValidator.isAllowedMediaURL(avatarURL) {
+                self.session?.avatar = avatarURL
+            }
         }
 
         return profile

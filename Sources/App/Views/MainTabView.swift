@@ -2,8 +2,8 @@ import SwiftUI
 import SwiftPaperATProtoCore
 
 struct MainTabView: View {
-    @State private var selectedTab = 0
     @EnvironmentObject var client: ATProtoClient
+    @EnvironmentObject var router: NavigationRouter
     
     @State private var showSplash = true
     @State private var splashScale: CGFloat = 0.85
@@ -11,7 +11,7 @@ struct MainTabView: View {
     
     var body: some View {
         ZStack {
-            TabView(selection: $selectedTab) {
+            TabView(selection: $router.selectedTab) {
                 NavigationStack {
                     FeedView()
                 }
@@ -41,6 +41,26 @@ struct MainTabView: View {
             .padding(.top, 10)
             #endif
             .opacity(showSplash ? 0.0 : 1.0)
+            .onOpenURL { url in
+                handleIncomingURL(url)
+            }
+            .sheet(isPresented: Binding(
+                get: { router.selectedProfileDID != nil },
+                set: { if !$0 { router.selectedProfileDID = nil } }
+            )) {
+                if let did = router.selectedProfileDID {
+                    UserProfileSheetView(did: did)
+                        .environmentObject(client)
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { router.selectedWebURL != nil },
+                set: { if !$0 { router.selectedWebURL = nil } }
+            )) {
+                if let webURL = router.selectedWebURL {
+                    BrowserSheetView(url: webURL)
+                }
+            }
             
             if showSplash {
                 Color.black.ignoresSafeArea()
@@ -73,7 +93,27 @@ struct MainTabView: View {
                         }
                     }
                 }
+    
+    private func handleIncomingURL(_ url: URL) {
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == "atproto" {
+            let host = url.host?.lowercased() ?? ""
+            if host == "mention" {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let didItem = components.queryItems?.first(where: { $0.name == "did" })?.value {
+                    router.selectedProfileDID = didItem
+                }
+            } else if host == "tag" {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let tagVal = components.queryItems?.first(where: { $0.name == "name" })?.value {
+                    withAnimation {
+                        router.selectedTab = 1
+                        router.discoverySearchText = tagVal
+                    }
+                }
             }
+        } else if scheme == "http" || scheme == "https" {
+            router.selectedWebURL = url
         }
     }
 }
