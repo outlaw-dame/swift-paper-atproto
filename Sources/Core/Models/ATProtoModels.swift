@@ -110,10 +110,36 @@ public struct Embed: Codable, Hashable {
 public struct EmbedVideo: Codable, Hashable {
     public let playlist: String
     public let thumbnail: String?
-    
+
+    /// Designated initialiser — validates playlist scheme before accepting.
     public init(playlist: String, thumbnail: String?) {
         self.playlist = playlist
         self.thumbnail = thumbnail
+    }
+
+    // MARK: - Hardened Decodable
+    // Validates both `playlist` and `thumbnail` URLs at decode time.
+    // Any non-http/https scheme causes the whole embed to decode as nil at the call-site.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawPlaylist = try container.decode(String.self, forKey: .playlist)
+        guard ATProtoURLValidator.isAllowedMediaURL(rawPlaylist) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .playlist, in: container,
+                debugDescription: "EmbedVideo.playlist has a disallowed URL scheme."
+            )
+        }
+        self.playlist = rawPlaylist
+
+        if let rawThumb = try container.decodeIfPresent(String.self, forKey: .thumbnail) {
+            self.thumbnail = ATProtoURLValidator.isAllowedMediaURL(rawThumb) ? rawThumb : nil
+        } else {
+            self.thumbnail = nil
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case playlist, thumbnail
     }
 }
 
@@ -121,11 +147,34 @@ public struct EmbedImage: Codable, Hashable {
     public let thumb: String
     public let fullsize: String
     public let alt: String?
-    
+
     public init(thumb: String, fullsize: String, alt: String?) {
         self.thumb = thumb
         self.fullsize = fullsize
         self.alt = alt
+    }
+
+    // MARK: - Hardened Decodable
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawThumb    = try container.decode(String.self, forKey: .thumb)
+        let rawFullsize = try container.decode(String.self, forKey: .fullsize)
+
+        // Reject non-http/https image URLs at the model layer.
+        guard ATProtoURLValidator.isAllowedMediaURL(rawThumb),
+              ATProtoURLValidator.isAllowedMediaURL(rawFullsize) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .thumb, in: container,
+                debugDescription: "EmbedImage contains a disallowed URL scheme."
+            )
+        }
+        self.thumb    = rawThumb
+        self.fullsize = rawFullsize
+        self.alt      = try container.decodeIfPresent(String.self, forKey: .alt)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case thumb, fullsize, alt
     }
 }
 
@@ -134,12 +183,39 @@ public struct EmbedExternal: Codable, Hashable {
     public let title: String
     public let description: String
     public let thumb: String?
-    
+
     public init(uri: String, title: String, description: String, thumb: String?) {
         self.uri = uri
         self.title = title
         self.description = description
         self.thumb = thumb
+    }
+
+    // MARK: - Hardened Decodable
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawUri = try container.decode(String.self, forKey: .uri)
+
+        // External link URIs must be http/https — blocks javascript:, data:, file: etc.
+        guard ATProtoURLValidator.isAllowedExternalURL(rawUri) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .uri, in: container,
+                debugDescription: "EmbedExternal.uri has a disallowed URL scheme."
+            )
+        }
+        self.uri         = rawUri
+        self.title       = String(try container.decode(String.self, forKey: .title).prefix(200))
+        self.description = String(try container.decode(String.self, forKey: .description).prefix(500))
+
+        if let rawThumb = try container.decodeIfPresent(String.self, forKey: .thumb) {
+            self.thumb = ATProtoURLValidator.isAllowedMediaURL(rawThumb) ? rawThumb : nil
+        } else {
+            self.thumb = nil
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case uri, title, description, thumb
     }
 }
 

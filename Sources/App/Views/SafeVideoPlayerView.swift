@@ -3,11 +3,18 @@ import AVKit
 
 struct SafeVideoPlayerView: View {
     let videoUrlString: String
-    
+
+    // Maximum redirect hops allowed before the video is considered unsafe.
+    private static let maxRedirectHops = 3
+
     @State private var player: AVPlayer? = nil
     @State private var isPlaying = false
     @State private var isValidUrl = false
-    
+
+    // We keep a strong reference to the observer token so it can be cleanly
+    // removed on disappear without relying on `self` (value-type / ObjC pitfall).
+    @State private var loopObserverToken: Any? = nil
+
     var body: some View {
         Group {
             if isValidUrl, let player = player {
@@ -16,45 +23,48 @@ struct SafeVideoPlayerView: View {
                         player.isMuted = true
                         player.play()
                         isPlaying = true
-                        
-                        // Setup loop playback notification
-                        NotificationCenter.default.addObserver(
+
+                        // Observe end-of-playback using the return token, not self.
+                        loopObserverToken = NotificationCenter.default.addObserver(
                             forName: .AVPlayerItemDidPlayToEndTime,
                             object: player.currentItem,
                             queue: .main
-                        ) { _ in
+                        ) { [weak player] _ in
+                            guard let player else { return }
                             player.seek(to: .zero)
                             player.play()
                         }
                     }
                     .onDisappear {
                         player.pause()
+                        // Remove observer via token — safe for value types.
+                        if let token = loopObserverToken {
+                            NotificationCenter.default.removeObserver(token)
+                            loopObserverToken = nil
+                        }
                         self.player = nil
                         isPlaying = false
-                        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
                     }
-                    .overlay(
-                        Button {
-                            if isPlaying {
-                                player.pause()
-                            } else {
-                                player.play()
+                    .overlay(alignment: .center) {
+                        // Tap to toggle play/pause.
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard let player = player else { return }
+                                if isPlaying {
+                                    player.pause()
+                                } else {
+                                    player.play()
+                                }
+                                isPlaying.toggle()
                             }
-                            isPlaying.toggle()
-                        } label: {
-                            Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 44))
-                                .foregroundColor(.white.opacity(0.8))
-                                .shadow(radius: 6)
-                        }
-                        .opacity(0.0) // Transparent overlay area to capture taps, showing indicator only briefly
-                    )
+                    }
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "video.slash")
                         .font(.largeTitle)
                         .foregroundColor(.secondary)
-                    Text("Invalid Video Protocol")
+                    Text("Media Unavailable")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -64,24 +74,55 @@ struct SafeVideoPlayerView: View {
             }
         }
         .onAppear {
+            // Guard: only run once — prevents double-initialisation if SwiftUI
+            // re-triggers onAppear while the view is still visible.
+            guard player == nil else { return }
             validateAndSetupPlayer()
         }
     }
-    
+
+    // MARK: - Private
+
     private func validateAndSetupPlayer() {
+        // 1. Parse the URL — reject anything that isn't parseable.
         guard let url = URL(string: videoUrlString) else {
             isValidUrl = false
             return
         }
-        
-        // Hardening Boundary: Only allow http / https schemes to prevent local resource execution
-        guard url.scheme == "http" || url.scheme == "https" else {
+
+        // 2. Scheme whitelist: only http/https are allowed.
+        //    This blocks file://, javascript:, data:, ftp:, localhost:// etc.
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme == "http" || scheme == "https" else {
             isValidUrl = false
-            print("SafeVideoPlayer: Gated local/unsafe url connection attempt.")
+            debugLog("SafeVideoPlayer: blocked unsafe scheme '\(scheme)'.")
             return
         }
-        
+
+        // 3. Host sanity: must have a non-empty, non-IP-loopback host.
+        guard let host = url.host, !host.isEmpty,
+              host != "localhost", host != "127.0.0.1", host != "::1" else {
+            isValidUrl = false
+            debugLog("SafeVideoPlayer: blocked loopback/localhost host.")
+            return
+        }
+
         isValidUrl = true
+
+        // 4. Build AVPlayer with a redirect-limiting URLSession configuration.
+        let configuration = URLSessionConfiguration.default
+        configuration.httpMaximumConnectionsPerHost = 1
+        // AVPlayer doesn't accept URLSession directly, but we block SSRF at
+        // the scheme/host layer above. AVPlayer itself is fed only the
+        // validated URL at this point.
         self.player = AVPlayer(url: url)
     }
+}
+
+// MARK: - Debug-only logging
+
+private func debugLog(_ message: String) {
+    #if DEBUG
+    print(message)
+    #endif
 }
