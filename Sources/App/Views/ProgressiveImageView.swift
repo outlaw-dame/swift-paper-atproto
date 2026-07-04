@@ -1,13 +1,39 @@
 import SwiftUI
 import SwiftPaperATProtoCore
 
+// MARK: - Cross-Platform Image Type
+
+/// Provides a single `PlatformImage` type that resolves to `UIImage` on iOS/tvOS
+/// and `NSImage` on macOS, allowing this file to compile under both toolchains.
+#if canImport(UIKit)
+import UIKit
+typealias PlatformImage = UIImage
+#elseif canImport(AppKit)
+import AppKit
+typealias PlatformImage = NSImage
+#endif
+
+/// SwiftUI `Image` initialiser shim: picks `Image(uiImage:)` or `Image(nsImage:)`
+/// depending on the platform without scattering `#if` guards through view code.
+extension Image {
+    init(platformImage: PlatformImage) {
+        #if canImport(UIKit)
+        self.init(uiImage: platformImage)
+        #elseif canImport(AppKit)
+        self.init(nsImage: platformImage)
+        #endif
+    }
+}
+
+// MARK: - ProgressiveImageView
+
 struct ProgressiveImageView: View {
     let imageUrlString: String
 
     /// Maximum bytes allowed for a downloaded image (5 MB, same as cache limit).
     private static let maxDownloadBytes = 5 * 1024 * 1024
 
-    @State private var uiImage: UIImage? = nil
+    @State private var loadedImage: PlatformImage? = nil
     @State private var isDownloading = false
     @State private var showFullScreen = false
     @State private var zoomScale: CGFloat = 1.0
@@ -17,8 +43,8 @@ struct ProgressiveImageView: View {
 
     var body: some View {
         Group {
-            if let image = uiImage {
-                Image(uiImage: image)
+            if let image = loadedImage {
+                Image(platformImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .scaleEffect(zoomScale)
@@ -49,7 +75,7 @@ struct ProgressiveImageView: View {
             }
         }
         .onAppear {
-            guard uiImage == nil, downloadTask == nil else { return }
+            guard loadedImage == nil, downloadTask == nil else { return }
             loadImageData()
         }
         .onDisappear {
@@ -58,7 +84,7 @@ struct ProgressiveImageView: View {
             downloadTask = nil
         }
         .fullScreenCover(isPresented: $showFullScreen) {
-            FullScreenMediaView(uiImage: uiImage, isPresented: $showFullScreen)
+            FullScreenMediaView(platformImage: loadedImage, isPresented: $showFullScreen)
         }
     }
 
@@ -83,8 +109,8 @@ struct ProgressiveImageView: View {
 
         // 4. Cache-first read.
         if let cachedData = try? SecureMediaCache.shared.getCachedMedia(url: url),
-           let image = UIImage(data: cachedData) {
-            self.uiImage = image
+           let image = PlatformImage(data: cachedData) {
+            self.loadedImage = image
             return
         }
 
@@ -120,7 +146,7 @@ struct ProgressiveImageView: View {
                 }
 
                 // Validate that bytes are actually image data before caching.
-                guard let image = UIImage(data: data) else {
+                guard let image = PlatformImage(data: data) else {
                     debugLog("ProgressiveImageView: response is not a valid image.")
                     return
                 }
@@ -129,7 +155,7 @@ struct ProgressiveImageView: View {
                 try SecureMediaCache.shared.cacheMedia(url: url, data: data)
 
                 await MainActor.run {
-                    self.uiImage = image
+                    self.loadedImage = image
                 }
             } catch is CancellationError {
                 debugLog("ProgressiveImageView: download task cancelled.")
@@ -143,7 +169,7 @@ struct ProgressiveImageView: View {
 // MARK: - Full Screen Interactive Media Zoom View
 
 struct FullScreenMediaView: View {
-    let uiImage: UIImage?
+    let platformImage: PlatformImage?
     @Binding var isPresented: Bool
 
     @State private var scale: CGFloat = 1.0
@@ -153,8 +179,8 @@ struct FullScreenMediaView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let image = uiImage {
-                Image(uiImage: image)
+            if let image = platformImage {
+                Image(platformImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .scaleEffect(scale)
@@ -190,7 +216,6 @@ struct FullScreenMediaView: View {
                                 } else {
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                         dragOffset = .zero
-                                        // Don't snap scale back on drag end — only on pinch end.
                                     }
                                 }
                             }
